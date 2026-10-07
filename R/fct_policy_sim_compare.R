@@ -1,10 +1,9 @@
 # Echarts4r builders (guidelines sec. 7) -----------------------------------------
 #
-# Browser-side counterparts of the ggplot builders above. Statistics stay in
-# R with the same parameters as the ggplot versions; echarts only draws the
+# Browser-side renderers. Statistics stay in R; echarts only draws the
 # precomputed values. Each builder returns a widget, never NULL: inputs that
-# the ggplot builder answered with `blank_plot("<message>")` come back as
-# `echart_blank("<message>")` so the user-facing message is preserved.
+# previously produced a static blank plot come back as `echart_blank()` with
+# the same user-facing message.
 
 # Deterministic even-stride downsample to <= max_points for very large raw
 # series (guidelines sec. 7); aggregated series are never downsampled.
@@ -198,14 +197,12 @@ echart_before_after_hist <- function(baseline_vals, policy_vals,
 
 #' Step 3 annual baseline/policy distribution chart (echarts4r)
 #'
-#' Step-3-specific counterpart of `plot_annual_distribution()`
-#' (fct_sim_compare.R) as rendered in the Step 3 results pane: one row per
+#' Step 3 annual distribution renderer: one row per
 #' scenario (Historical on top) with violins or boxes over the raw weather-
 #' year draws, mean markers, and the historical-baseline reference line.
 #' Violin/box statistics are precomputed in R: violin densities use
-#' `stats::density()` with default bandwidth (ggplot's nrd0/trim behaviour),
-#' scaled to the ggplot's row width; boxes use `boxplot.stats()`. The ggplot
-#' builder remains available as the visual reference.
+#' `stats::density()` with default bandwidth (nrd0/trim behaviour), scaled to
+#' the static renderer's row width; boxes use `boxplot.stats()`.
 #'
 #' @param tbl       A `timeseries_curves`-style data frame (scenario, value,
 #'   and optionally source).
@@ -633,12 +630,11 @@ echart_step3_annual_distribution <- function(tbl, x_label = "Outcome (outcome un
 
 #' Adverse return-period dumbbell chart (echarts4r)
 #'
-#' Browser-side counterpart of `plot_step3_adverse_dot()`: per return-period
+#' Interactive renderer for Step 3 adverse return periods: per return-period
 #' rows with vertical scenario dodge, alternating row banding, climate-model
 #' spread segments, baseline -> policy connector arrows, and one-time
 #' Baseline/Policy captions and scenario labels. All positions (rp_y,
-#' dodge_offset, label anchors) are precomputed in R with the same code as
-#' the ggplot version.
+#' dodge_offset, label anchors) are precomputed in R.
 #'
 #' @param tbl      A `step3_adverse_dot_data()` data frame.
 #' @param x_label  Outcome-axis title.
@@ -1035,6 +1031,30 @@ policy_input_diagnostics <- function(baseline_svy, policy_svy, vars = NULL) {
     ) else NULL)
 }
 
+#' Share of climate-driven loss offset by the policy
+#'
+#' Favourable direction comes from the metric (`higher_is_better` or
+#' `lower_is_better`). Returns NA unless climate worsens the metric and the
+#' policy improves it, so a ratio is never reported for a climate gain or a
+#' policy that adds to the loss.
+#' @param b_hist Historical baseline value (no policy).
+#' @param b_scen Scenario baseline value (no policy).
+#' @param p_scen Scenario value with the policy.
+#' @param direction Metric direction.
+#' @noRd
+step3_offset_share <- function(b_hist, b_scen, p_scen, direction) {
+  sgn <- switch(as.character(direction %||% "")[1L],
+    higher_is_better = 1, lower_is_better = -1, 0
+  )
+  vals <- suppressWarnings(as.numeric(c(b_hist, b_scen, p_scen)))
+  if (sgn == 0 || length(vals) != 3L || !all(is.finite(vals))) {
+    return(NA_real_)
+  }
+  loss <- -sgn * (vals[[2L]] - vals[[1L]])
+  gain <- sgn * (vals[[3L]] - vals[[2L]])
+  if (loss <= 0 || gain <= 0) NA_real_ else gain / loss
+}
+
 #' Build Step 3 Results Headline Cards
 #'
 #' Pure function returning a list of 5 card specifications for
@@ -1099,6 +1119,23 @@ step3_headline_cards <- function(paired_summary,
   } else {
     "Paired policy minus baseline"
   }
+  # 95% interval from estimation (coefficient) uncertainty of the paired
+  # contrast; shown instead of the generic line when it can be derived.
+  coef_sd_1 <- if ("coef_sd" %in% names(focus)) focus$coef_sd[[1L]] else NA_real_
+  ci_1 <- NULL
+  if (is.finite(coef_sd_1) && coef_sd_1 > 0 && is.finite(effect_val)) {
+    half <- stats::qnorm(0.975) * coef_sd_1
+    unit_suffix <- paste0(" ", spec$change_unit %||% "")
+    lo_txt <- fmt_change(effect_val - half)
+    if (nzchar(trimws(unit_suffix)) && endsWith(lo_txt, unit_suffix)) {
+      lo_txt <- substr(lo_txt, 1L, nchar(lo_txt) - nchar(unit_suffix))
+    }
+    ci_1 <- list(
+      lo = effect_val - half, hi = effect_val + half,
+      text = paste0("(95% CI: ", lo_txt, " to ", fmt_change(effect_val + half), ")")
+    )
+    line1_1 <- ci_1$text
+  }
   line2_1 <- if (nrow(fut_effects) > 1L) {
     paste0(focus_scen, " (focus of ", nrow(fut_effects), ")")
   } else {
@@ -1119,6 +1156,10 @@ step3_headline_cards <- function(paired_summary,
       } else "",
       "Equal-model mean.",
       "Paired difference (policy minus baseline) for the fixed population.",
+      if (!is.null(ci_1)) paste(
+        "The 95% interval reflects uncertainty in the estimated weather coefficients only;",
+        "climate-model disagreement is shown on the Policy robustness card."
+      ),
       "Years averaged within model; climate models weighted equally. A positive value",
       "indicates an increase in the selected metric, not necessarily a benefit.",
       metric_context_note(spec),
@@ -1130,7 +1171,47 @@ step3_headline_cards <- function(paired_summary,
     )
   )
 
-  # 2. Adverse weather year protection (1-in-20 headline)
+  card1$status <- headline_status(effect_val, spec$direction, display = val_1)
+  card1$effect_ci_native <- if (!is.null(ci_1)) c(ci_1$lo, ci_1$hi) else c(NA_real_, NA_real_)
+
+  # Weighted population (people) for translating a rate change into the number
+  # of poor; only for headcount metrics with survey weights.
+  pop_people <- if (identical(method, "headcount_ratio") && is.data.frame(baseline_svy) &&
+    "weight" %in% names(baseline_svy)) {
+    w <- suppressWarnings(as.numeric(baseline_svy$weight))
+    sum(w[is.finite(w)])
+  } else {
+    NA_real_
+  }
+  poor_1 <- poor_change_text(effect_val, pop_people)
+  if (!is.null(poor_1)) {
+    card1$note <- paste(card1$note, poor_1, sep = " \u00b7 ")
+    card1$note_html <- shiny::tagList(card1$note_html, shiny::tags$div(poor_1))
+  }
+
+  # Share of the climate-driven change that the policy offsets: the policy's
+  # favourable-direction gain over the favourable-direction loss from climate
+  # (SSP baseline vs historical baseline, both without the policy).
+  hist_rows <- paired_summary[grepl("^Historical", levels), , drop = FALSE]
+  b_hist <- if (nrow(hist_rows) && "baseline" %in% names(hist_rows)) hist_rows$baseline[[1L]] else NA_real_
+  offset <- step3_offset_share(b_hist, b_mean, p_mean, spec$direction)
+  card1$offset_share <- offset
+  if (is.finite(offset)) {
+    offset_txt <- if (offset >= 1) {
+      paste0("more than offsets climate change (", fmt_num(offset, 1), "\u00d7)")
+    } else {
+      paste0("offsets ", fmt_num(100 * offset, 0), "% of climate change")
+    }
+    card1$note <- paste(card1$note, offset_txt, sep = " \u00b7 ")
+    card1$note_html <- shiny::tagList(card1$note_html, shiny::tags$div(offset_txt))
+    card1$info <- paste(card1$info,
+      "Offset share: the policy's gain in the metric's favourable direction divided by the",
+      "loss the climate scenario causes without the policy (scenario baseline vs historical",
+      "baseline). Shown only when climate worsens the metric and the policy improves it.")
+  }
+
+  # Baseline-anchored adverse-year effects (1-in-20 headline). These feed the
+  # Resilience card's context line; there is no separate adverse-year card.
   eff_20 <- NA_real_
   if (!is.null(threshold_tbl) && nrow(threshold_tbl) && "source" %in% names(threshold_tbl)) {
     rp_map <- metric_decision_return_periods(method %||% "mean", so)
@@ -1205,27 +1286,7 @@ step3_headline_cards <- function(paired_summary,
     eff_50 <- get_metric_tail(50)
   }
 
-  val_2 <- fmt_change(eff_20)
-
-  line1_2 <- if (is.finite(eff_20)) "Policy vs baseline" else "Baseline-anchored adverse result unavailable"
-  line2_2 <- "1-in-20 year"
-
-  card2 <- list(
-    label = "Adverse weather years",
-    value = val_2,
-    note = paste(line1_2, line2_2, focus_scen, sep = " \u00b7 "),
-    note_html = shiny::tagList(
-      shiny::tags$div(line1_2),
-      shiny::tags$div(style = "font-weight: 600;", line2_2),
-      shiny::tags$div(focus_scen)
-    ),
-    info = paste(
-      "Baseline-anchored adverse quantile of the selected annual aggregate metric. Adjacent baseline-year ranks are interpolated and the same within-model weights are applied to policy.",
-      "SSP values use an equal-model mean. This is not a weather-loss-avoided estimate; component uncertainty is not estimated."
-    )
-  )
-
-  # 3. Resilience effect in the selected metric. Never fall back to the
+  # 2. Resilience effect in the selected metric. Never fall back to the
   # historical technical decomposition when annual channel attribution fails.
   resilience_modeled <- !is.null(metric_decomposition) &&
     (isTRUE(metric_decomposition$metadata$repositioning_modeled) ||
@@ -1263,37 +1324,61 @@ step3_headline_cards <- function(paired_summary,
       "Unavailable"
     } else "Not included in fitted model"
   }
+  # Context line: the number-of-poor equivalent and any component the engine
+  # or fitted model does not provide. The total and main effects, and the full
+  # main / repositioning / interaction breakdown, are in the popover.
+  missing_bits <- c(
+    if (!is.null(metric_tail_focus) && !grepl("^[-+0-9]", repositioning_text)) {
+      paste("Repositioning:", tolower(repositioning_text))
+    },
+    if (!is.null(metric_tail_focus) && !grepl("^[-+0-9]", interaction_text)) {
+      paste("Interaction:", tolower(interaction_text))
+    }
+  )
+  res_native <- if (!is.null(metric_tail_focus) && resilience_modeled &&
+      length(metric_tail_focus$resilience)) metric_tail_focus$resilience[[1L]] else NA_real_
+  poor_2 <- poor_change_text(res_native, pop_people)
   line1_3 <- if (!is.null(metric_tail_focus)) {
-    paste0("Main: ", main_text, " \u00b7 Repositioning: ",
-      if (identical(repositioning_text, "Not modeled by this engine")) "Not modeled" else repositioning_text,
-      " \u00b7 Interaction: ", interaction_text)
+    paste(c(poor_2, if (length(missing_bits)) paste(missing_bits, collapse = "; ")),
+      collapse = " \u00b7 ")
   } else if (!is.null(metric_focus)) {
     "1-in-20 year attribution unavailable"
   } else metric_focus_reason
-  line2_3 <- paste(focus_scen, "\u00b7 1-in-20 year")
+  line2_3 <- paste("1-in-20 year", "\u00b7", focus_scen)
 
-  card3 <- list(
+  card2 <- list(
     label = "Resilience effect",
     value = val_3,
-    note = paste(line1_3, line2_3, sep = " \u00b7 "),
+    note = paste(c(if (nzchar(line1_3 %||% "")) line1_3, line2_3), collapse = " \u00b7 "),
     note_html = shiny::tagList(
-      shiny::tags$div(line1_3),
+      if (nzchar(line1_3 %||% "")) shiny::tags$div(line1_3),
       shiny::tags$div(style = "font-weight: 600;", line2_3)
     ),
     info = paste(
-      "Baseline-anchored adverse quantile of the selected annual aggregate metric:",
-      "the main effect, then modeled repositioning, then interaction.",
-      "The resilience subtotal is repositioning plus interaction, not the main effect.",
+      "How much the policy changes sensitivity to bad weather: the repositioning plus",
+      "interaction part of the policy effect in a baseline-anchored 1-in-20 adverse year",
+      "(the main effect is shown separately). A value that moves the metric in its",
+      "favourable direction means the policy reduces weather sensitivity.",
       "The same interpolated baseline-year rank weights are applied to every cumulative state.",
       "This is not an avoided-loss estimate. Component uncertainty is not estimated.",
       metric_context_note(spec),
+      "Total adverse-year effect:", fmt_change(eff_20),
       "Main effect:", main_text,
       "Repositioning:", repositioning_text,
       "Interaction:", interaction_text
     )
   )
+  card2$adverse_effect_native <- eff_20
+  if (is.finite(res_native)) {
+    fav <- headline_status(res_native, spec$direction)
+    if (!is.null(fav) && fav$kind %in% c("favourable", "adverse")) {
+      card2$status <- list(kind = fav$kind, text = if (fav$kind == "favourable") {
+        "Reduces weather sensitivity"
+      } else "Increases weather sensitivity")
+    }
+  }
 
-  # 4. Program scale & reach
+  # 3. Program scale & reach
   # Units covered or affected by any implemented policy: social protection
   # recipients plus units whose covariates another policy lever changed -
   # the same union the Diagnostics tab's coverage table reports. Without a
@@ -1314,15 +1399,18 @@ step3_headline_cards <- function(paired_summary,
 
   scale_val <- "Unavailable"
   reach_households <- NA_real_
-  line1_4 <- "Population covered or affected"
-
+  line1_4 <- "People covered or affected"
   if (!is.null(touched) && any(touched, na.rm = TRUE)) {
     w <- if ("weight" %in% names(policy_svy)) as.numeric(policy_svy$weight) else rep(1, nrow(policy_svy))
     ok <- touched & is.finite(w)
     # The reach card reports people. Diagnostics also breaks represented
     # households out separately for household-mode analysis.
     pop <- sum(w[ok])
-    scale_val <- if (is.finite(pop) && pop > 0) paste0(fmt_num(pop / 1e6, 1), "M") else "Unavailable"
+    scale_val <- if (is.finite(pop) && pop > 0) fmt_compact_count(pop) else "Unavailable"
+    total_pop <- sum(w[is.finite(w)])
+    if (is.finite(pop) && pop > 0 && is.finite(total_pop) && total_pop > 0) {
+      line1_4 <- paste0(line1_4, " \u00b7 ", fmt_num(100 * pop / total_pop, 0), "% of population")
+    }
     if (identical(analysis_unit, "hh")) {
       hh <- if ("hhsize" %in% names(policy_svy)) {
         suppressWarnings(as.numeric(policy_svy$hhsize))
@@ -1331,11 +1419,10 @@ step3_headline_cards <- function(paired_summary,
       }
       hh[!is.finite(hh) | hh <= 0] <- 1
       reach_households <- sum((w / hh)[ok])
-      line1_4 <- "People represented; recipient households reported in Diagnostics"
     }
   }
 
-  card4 <- list(
+  card3 <- list(
     label = "Program reach",
     value = scale_val,
     note = line1_4,
@@ -1351,25 +1438,30 @@ step3_headline_cards <- function(paired_summary,
     )
   )
   if (is.finite(reach_households)) {
-    card4$households_represented <- reach_households
-    card4$note <- paste0(line1_4, " \u00b7 ", fmt_num(reach_households), " households")
-    card4$note_html <- shiny::tagList(
+    card3$households_represented <- reach_households
+    hh_txt <- paste0(fmt_compact_count(reach_households), " households")
+    card3$note <- paste0(line1_4, " \u00b7 ", hh_txt)
+    card3$note_html <- shiny::tagList(
       shiny::tags$div(line1_4),
-      shiny::tags$div(style = "font-weight: 600;", paste0(
-        fmt_num(reach_households), " covered-household equivalents"
-      ))
+      shiny::tags$div(style = "font-weight: 600;", hh_txt)
     )
   }
 
-  # 5. Policy robustness & consensus
+  # 4. Policy robustness & consensus
   n_mods <- suppressWarnings(as.integer(focus$n_models %||% 1L))[1L]
   if (!is.finite(n_mods) || n_mods < 1L) n_mods <- 1L
 
   lo_val <- focus$intermod_lo[[1L]] %||% NA_real_
   hi_val <- focus$intermod_hi[[1L]] %||% NA_real_
 
-  val_5 <- if (is.finite(lo_val) && is.finite(hi_val) && lo_val > 0) {
-    "100% positive"
+  # Model range is min-max across climate models, so a range that excludes
+  # zero means every model agrees on the direction of the policy change.
+  all_agree <- is.finite(lo_val) && is.finite(hi_val) && n_mods > 1L &&
+    (lo_val > 0 || hi_val < 0)
+  val_5 <- if (all_agree) {
+    paste0("All ", n_mods, " models agree")
+  } else if (is.finite(lo_val) && is.finite(hi_val) && n_mods > 1L) {
+    "Models disagree"
   } else if (is.finite(lo_val) && is.finite(hi_val)) {
     paste(fmt_change(lo_val), "to", fmt_change(hi_val))
   } else if (n_mods > 1L) {
@@ -1410,29 +1502,36 @@ step3_headline_cards <- function(paired_summary,
   } else NA_real_
   prediction_note <- format_prediction_count(prediction_count, analysis_unit)
 
-  card5 <- list(
+  card4 <- list(
     label = "Policy robustness",
     value = val_5,
     note = paste(line1_5, line2_5, prediction_note, sep = " \u00b7 "),
-    note_html = shiny::tagList(
-      shiny::tags$div(line1_5),
-      shiny::tags$div(style = "font-weight: 600;", line2_5),
-      shiny::tags$div(style = "font-weight: 600;", prediction_note)
-    ),
+    note_html = shiny::tagList(shiny::tags$div(line1_5)),
+    # Counts are provenance: shown in the basis strip, kept in `note` for export.
+    basis_text = paste(line2_5, prediction_note, sep = " \u00b7 "),
       info = paste(
         "Consistency of the signed policy change across all simulated CMIP6 climate models",
         "and weather years. Disagreement across models indicates climate uncertainty",
         "in policy effectiveness. Model range values use the metric's displayed units."
       )
   )
-  card5$prediction_count_native <- prediction_count
-  card5$prediction_count_note <- prediction_note
-  card5$prediction_sample_rows <- sample_rows
+  if (all_agree) {
+    dir_status <- headline_status(lo_val + hi_val, spec$direction)
+    card4$status <- list(
+      kind = dir_status$kind %||% "neutral",
+      text = paste0(if (lo_val > 0) "Raises " else "Lowers ", tolower(spec$label))
+    )
+  } else if (is.finite(lo_val) && is.finite(hi_val) && n_mods > 1L) {
+    card4$status <- list(kind = "uncertain", text = "Mixed across models")
+  }
+  card4$prediction_count_native <- prediction_count
+  card4$prediction_count_note <- prediction_note
+  card4$prediction_sample_rows <- sample_rows
 
   card1$metric_note <- metric_context_note(spec)
-  cards <- list(card1, card2, card3, card4, card5)
+  cards <- list(card1, card2, card3, card4)
   if (!identical(endpoint_status$status, "ok")) {
-    for (id in c(1L, 2L, 3L, 5L)) {
+    for (id in c(1L, 2L, 4L)) {
       cards[[id]]$value <- "Unavailable"
       cards[[id]]$note <- cards[[id]]$info <- endpoint_status$reason
       cards[[id]]$note_html <- shiny::tags$div(endpoint_status$reason)
@@ -1680,7 +1779,6 @@ step3_adverse_dot_data <- function(threshold_tbl, method = "mean", so = NULL) {
     # 0. Stale banner (INT-08), policy summary, & headline cards ----
     shiny::uiOutput(ns("stale_banner_ui")),
     shiny::uiOutput(ns("policy_method_note")),
-    shiny::uiOutput(ns("metric_context_note")),
     shiny::uiOutput(ns("policy_summary_ui")),
 
     # 1. Analysis controls: Aggregation method & poverty line ----
@@ -2170,10 +2268,6 @@ step3_adverse_dot_data <- function(threshold_tbl, method = "mean", so = NULL) {
     spec$reason <- if (isTRUE(stale())) "Policy run is stale." else policy_endpoint_status()$reason
     spec
   })
-  output$metric_context_note <- shiny::renderUI({
-    shiny::tags$p(class = "diagnostic-note", metric_context_note(metric_context()))
-  })
-
   # PERF-31: per-method aggregation cache ----
   # Aggregating baseline/policy hist + every scenario member is expensive and
   # depends only on (source, aggregation method, poverty line). `cmp_deviation`
@@ -3037,8 +3131,8 @@ step3_adverse_dot_data <- function(threshold_tbl, method = "mean", so = NULL) {
 
   # Section 1: Annual weather variation (baseline and policy) ----
   # Zero-arg echarts closures shared by the on-screen renders and the export
-  # bundle (guidelines sec. 7 pattern); the ggplot builders remain the static
-  # export reference.
+  # bundle (guidelines sec. 7 pattern); static renderers are archived under
+  # dev/static plots/.
   annual_distribution_chart <- function() {
     echart_step3_annual_distribution(
       timeseries_curves_rv(),
@@ -3132,14 +3226,6 @@ step3_adverse_dot_data <- function(threshold_tbl, method = "mean", so = NULL) {
     )
   })
 
-  wise_export_figure(
-    key = "policy_distributional_incidence",
-    label = "Policy effect by baseline decile",
-    step = 3L,
-    fun = function() plot_incidence_by_decile(step3_incidence_data(), "Paired policy minus baseline effect"),
-    description = "Paired policy-minus-baseline welfare effect by fixed baseline welfare decile.",
-    width = 9, height = 5.5
-  )
   wise_export_table(
     key = "policy_distributional_incidence_data",
     label = "Policy effect by baseline decile data",
@@ -3266,28 +3352,6 @@ step3_adverse_dot_data <- function(threshold_tbl, method = "mean", so = NULL) {
     .wise_threshold_reactable(as.data.frame(df))
   })
   outputOptions(output, "summary_threshold_table", suspendWhenHidden = TRUE)
-
-  # UI-48: Step 3's baseline-vs-policy comparison figures.
-  wise_export_figure(
-    key = "policy_outcome_distribution",
-    label = "Baseline vs policy welfare by scenario",
-    step = 3L,
-    fun = function() {
-      paired_effect_plot(
-        paired_effect_summary_rv(),
-        metric_axis_label(
-          aggregation_method(),
-          baseline_hist_sim()$so,
-          input$cmp_deviation %||% "none"
-        )
-      )
-    },
-    description = paste(
-      "Simulated welfare under the baseline and the policy scenario, by",
-      "climate scenario and projection period."
-    ),
-    width = 10, height = 6.5
-  )
 
   exceedance_chart <- function() {
     curves <- exceedance_curves_rv()

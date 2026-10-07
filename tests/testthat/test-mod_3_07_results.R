@@ -40,8 +40,9 @@ test_that("Step 3 cards format rate levels and absolute changes without benefit 
   summary$intermod_hi <- .7
   summary$n_models <- 3L
   binary <- step3_headline_cards(summary, so = list(name = "indicator", type = "binary"))
-  expect_match(binary[[5]]$value, "-20.00 pp to +70.00 pp", fixed = TRUE)
-  expect_match(binary[[5]]$note, "Model range: -20.00 to +70.00 pp", fixed = TRUE)
+  expect_identical(binary[[4]]$value, "Models disagree")
+  expect_identical(binary[[4]]$status$kind, "uncertain")
+  expect_match(binary[[4]]$note, "Model range: -20.00 to +70.00 pp", fixed = TRUE)
 })
 
 test_that("resilience and adverse headline cards use metric-aware shared results", {
@@ -62,34 +63,43 @@ test_that("resilience and adverse headline cards use metric-aware shared results
     mechanisms = list(repositioning_status = "modeled", interaction_status = "included")
   )
   cards <- step3_headline_cards(summary, method = "headcount_ratio", metric_decomposition = metric)
-  expect_identical(cards[[3]]$value, "-6.00 pp")
-  expect_match(cards[[3]]$note, "Repositioning: -1.00 pp", fixed = TRUE)
-  expect_match(cards[[3]]$note, "Interaction: -5.00 pp", fixed = TRUE)
-  expect_match(cards[[3]]$note, "Main: -2.00 pp", fixed = TRUE)
-  expect_equal(as.numeric(sub(" pp$", "", substring(cards[[3]]$value, 1L,
-    nchar(cards[[3]]$value) - 3L))),
-    sum(c(-.01, -.05)) * 100)
-  expect_match(cards[[3]]$note, "SSP2-4.5 / 2030-2040", fixed = TRUE)
-  expect_match(cards[[3]]$note, "1-in-20 year", fixed = TRUE)
-  expect_identical(cards[[2]]$value, "-8.00 pp")
-  expect_identical(cards[[2]]$label, "Adverse weather years")
-  expect_match(cards[[2]]$note, "Policy vs baseline", fixed = TRUE)
-  expect_match(cards[[2]]$note, "1-in-20 year", fixed = TRUE)
-  expect_false(grepl("View adverse channel attribution", cards[[2]]$note, fixed = TRUE))
-  expect_match(as.character(cards[[2]]$note_html[[2]]), "font-weight: 600", fixed = TRUE)
+  expect_length(cards, 4L)
+  expect_identical(cards[[2]]$label, "Resilience effect")
+  expect_identical(cards[[2]]$value, "-6.00 pp")
+  # Resilience = repositioning + interaction = -1 + -5 pp.
+  expect_equal(-1 + -5, -6)
+  # The total and main effects are not repeated on the card; they are in the popover.
+  expect_false(grepl("Total", cards[[2]]$note, fixed = TRUE))
+  expect_match(cards[[2]]$info, "Total adverse-year effect: -8.00 pp", fixed = TRUE)
+  expect_match(cards[[2]]$info, "Main effect: -2.00 pp", fixed = TRUE)
   expect_match(cards[[2]]$note, "SSP2-4.5 / 2030-2040", fixed = TRUE)
-  expect_false(grepl("How the Policy Changes Weather Sensitivity", as.character(cards[[3]]$note_html), fixed = TRUE))
+  expect_match(cards[[2]]$note, "1-in-20 year", fixed = TRUE)
+  expect_match(cards[[2]]$info, "Repositioning: -1.00 pp", fixed = TRUE)
+  expect_match(cards[[2]]$info, "Interaction: -5.00 pp", fixed = TRUE)
+  expect_match(as.character(cards[[2]]$note_html[[2]]), "font-weight: 600", fixed = TRUE)
+  expect_equal(cards[[2]]$adverse_effect_native, -.08)
+  # Poverty rate is lower-is-better: a negative resilience value reduces
+  # weather sensitivity.
+  expect_identical(cards[[2]]$status$kind, "favourable")
+  expect_identical(cards[[2]]$status$text, "Reduces weather sensitivity")
+
+  adverse <- metric
+  adverse$return_period$resilience <- 0.0023
+  adverse_cards <- step3_headline_cards(summary, method = "headcount_ratio",
+    metric_decomposition = adverse)
+  expect_identical(adverse_cards[[2]]$status$kind, "adverse")
+  expect_identical(adverse_cards[[2]]$status$text, "Increases weather sensitivity")
 
   metric$metadata$repositioning_modeled <- FALSE
   metric$metadata$interaction_included <- FALSE
   metric$return_period$resilience <- NA_real_
   unavailable_resilience <- step3_headline_cards(summary, method = "headcount_ratio",
     metric_decomposition = metric)
-  expect_identical(unavailable_resilience[[3]]$value, "Unavailable")
-  expect_match(unavailable_resilience[[3]]$note, "Not modeled", fixed = TRUE)
-  expect_identical(unavailable_resilience[[3]]$note,
-    "Main: -2.00 pp · Repositioning: Not modeled · Interaction: Not included in fitted model · SSP2-4.5 / 2030-2040 · 1-in-20 year")
-  expect_match(unavailable_resilience[[3]]$info, "Not included in fitted model", fixed = TRUE)
+  expect_identical(unavailable_resilience[[2]]$value, "Unavailable")
+  expect_null(unavailable_resilience[[2]]$status)
+  expect_match(unavailable_resilience[[2]]$note, "not modeled", fixed = TRUE)
+  expect_match(unavailable_resilience[[2]]$note, "not included in fitted model", fixed = TRUE)
+  expect_match(unavailable_resilience[[2]]$info, "Not included in fitted model", fixed = TRUE)
 })
 
 test_that("Results module returns selection API while preserving uncertainty reactive", {
@@ -111,7 +121,7 @@ test_that("Results module returns selection API while preserving uncertainty rea
   })
 })
 
-test_that("step3_headline_cards builds 5 concise policy cards", {
+test_that("step3_headline_cards builds 4 concise policy cards", {
   paired_sum <- tibble::tibble(
     scenario    = c("Historical", "SSP2-4.5 / 2030-2040"),
     value       = c(0.00, 0.45),
@@ -146,7 +156,7 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
     so                = list(type = "numeric", name = "welfare")
   )
 
-  expect_length(cards, 5L)
+  expect_length(cards, 4L)
 
   # Card 1: Expected policy effect
   expect_identical(cards[[1]]$label, "Expected policy effect")
@@ -169,31 +179,28 @@ test_that("step3_headline_cards builds 5 concise policy cards", {
   expect_match(total_cards[[1]]$value, "-10", fixed = TRUE)
   expect_match(total_cards[[1]]$info, "baseline: 100 $ per day", fixed = TRUE)
 
-  # Card 2: Adverse 1-in-10 protection
-  expect_identical(cards[[2]]$label, "Adverse weather years")
+  # Card 2: Resilience effect (also carries the adverse-year total)
+  expect_identical(cards[[2]]$label, "Resilience effect")
   expect_identical(cards[[2]]$value, "Unavailable")
-  expect_match(cards[[2]]$note, "Baseline-anchored adverse result unavailable · 1-in-20 year · SSP2-4.5 / 2030-2040", fixed = TRUE)
 
-  # Card 3: Policy channels
-  expect_identical(cards[[3]]$label, "Resilience effect")
+  # Card 3: Program scale & reach
+  expect_identical(cards[[3]]$label, "Program reach")
   expect_identical(cards[[3]]$value, "Unavailable")
+  expect_match(cards[[3]]$note, "People covered or affected", fixed = TRUE)
 
-  # Card 4: Program scale & reach
-  expect_identical(cards[[4]]$label, "Program reach")
-  expect_identical(cards[[4]]$value, "Unavailable")
-  expect_match(cards[[4]]$note, "Population covered or affected", fixed = TRUE)
-
-  # Card 5: Policy robustness
-  expect_identical(cards[[5]]$label, "Policy robustness")
-  expect_identical(cards[[5]]$value, "100% positive")
-  expect_match(cards[[5]]$note, "Model range: +0.32 to +0.58 outcome units", fixed = TRUE)
+  # Card 4: Policy robustness (every model range is above zero)
+  expect_identical(cards[[4]]$label, "Policy robustness")
+  expect_identical(cards[[4]]$value, "All 4 models agree")
+  expect_identical(cards[[4]]$status$text, "Raises mean")
+  expect_identical(cards[[4]]$status$kind, "favourable")
+  expect_match(cards[[4]]$note, "Model range: +0.32 to +0.58 outcome units", fixed = TRUE)
 
   # Serializer
   df <- step3_headline_df(cards)
   expect_s3_class(df, "data.frame")
-  expect_equal(nrow(df), 5L)
-  expect_identical(df$label, c("Expected policy effect", "Adverse weather years",
-                               "Resilience effect", "Program reach", "Policy robustness"))
+  expect_equal(nrow(df), 4L)
+  expect_identical(df$label, c("Expected policy effect", "Resilience effect",
+                               "Program reach", "Policy robustness"))
 })
 
 test_that("Program scale & reach counts units affected by all implemented policies", {
@@ -226,16 +233,18 @@ test_that("Program scale & reach counts units affected by all implemented polici
   )
 
   # Touched rows: 1, 2, 3 -> represented population = 100 + 200 + 300 = 600
-  expect_identical(cards[[4]]$value, paste0(fmt_num(600 / 1e6, 1), "M"))
-  expect_equal(cards[[4]]$households_represented,
+  expect_identical(cards[[3]]$value, "600")
+  expect_equal(cards[[3]]$households_represented,
     100 / 4 + 200 / 3 + 300 / 2)
-  expect_identical(cards[[5]]$prediction_count_native, 960)
-  expect_identical(cards[[5]]$prediction_count_note, "960 household-years")
-  expect_match(cards[[5]]$note, "960 household-years", fixed = TRUE)
-  expect_match(as.character(cards[[5]]$note_html), "font-weight: 600", fixed = TRUE)
-  expect_identical(step3_headline_df(cards)$prediction_count_native[[5]], 960)
-  expect_identical(step3_headline_df(cards)$prediction_sample_rows[[5]], 4)
-  expect_match(cards[[4]]$info, "another policy lever", fixed = TRUE)
+  expect_identical(cards[[4]]$prediction_count_native, 960)
+  expect_identical(cards[[4]]$prediction_count_note, "960 household-years")
+  expect_match(cards[[4]]$note, "960 household-years", fixed = TRUE)
+  # Counts are provenance: in the basis strip, not the card body.
+  expect_no_match(as.character(cards[[4]]$note_html), "household-years", fixed = TRUE)
+  expect_match(cards[[4]]$basis_text, "960 household-years", fixed = TRUE)
+  expect_identical(step3_headline_df(cards)$prediction_count_native[[4]], 960)
+  expect_identical(step3_headline_df(cards)$prediction_sample_rows[[4]], 4)
+  expect_match(cards[[3]]$info, "another policy lever", fixed = TRUE)
 
   # Without a baseline frame, falls back to SP recipients only (rows 1 and 3).
   cards_sp <- step3_headline_cards(
@@ -243,9 +252,10 @@ test_that("Program scale & reach counts units affected by all implemented polici
     policy_svy     = pol,
     analysis_unit  = "hh"
   )
-  expect_identical(cards_sp[[4]]$value, paste0(fmt_num(400 / 1e6, 1), "M"))
-  expect_equal(cards_sp[[4]]$households_represented, 100 / 4 + 300 / 2)
-  expect_match(cards_sp[[4]]$note, "recipient households reported in Diagnostics", fixed = TRUE)
+  expect_identical(cards_sp[[3]]$value, "400")
+  expect_equal(cards_sp[[3]]$households_represented, 100 / 4 + 300 / 2)
+  expect_match(cards_sp[[3]]$note, "175 households", fixed = TRUE)
+  expect_match(cards_sp[[3]]$note, "% of population", fixed = TRUE)
 
   # No touched units at all -> Unavailable.
   pol_none <- base
@@ -254,10 +264,10 @@ test_that("Program scale & reach counts units affected by all implemented polici
     policy_svy     = pol_none,
     baseline_svy   = base
   )
-  expect_identical(cards_none[[4]]$value, "Unavailable")
+  expect_identical(cards_none[[3]]$value, "Unavailable")
 })
 
-test_that("step3_adverse_dot_data and plot_step3_adverse_dot work correctly", {
+test_that("step3_adverse_dot_data works correctly", {
   thresh <- tibble::tibble(
     scenario      = rep(c("Historical", "SSP2-4.5 / 2030-2040"), each = 8),
     source        = rep(rep(c("Baseline", "Policy"), each = 4), 2),
@@ -418,4 +428,99 @@ test_that(".results_pane_ui handles tibble so without level and 12-element weath
   })
   html_df <- as.character(htmltools::renderTags(ui_df)$html)
   expect_match(html_df, "How does the policy shift welfare across climate scenarios and weather years?", fixed = TRUE)
+})
+
+test_that("step3_offset_share reports the share of climate loss offset by the policy", {
+  # Poverty rate (lower is better): climate +2 pp, policy -1 pp.
+  expect_equal(step3_offset_share(0.30, 0.32, 0.31, "lower_is_better"), 0.5)
+  # Policy more than offsets the climate loss.
+  expect_equal(step3_offset_share(0.30, 0.32, 0.28, "lower_is_better"), 2)
+  # Higher is better: climate -2, policy +1.
+  expect_equal(step3_offset_share(10, 8, 9, "higher_is_better"), 0.5)
+  # Climate improves the metric, the policy adds to the loss, or direction unknown.
+  expect_true(is.na(step3_offset_share(0.30, 0.28, 0.27, "lower_is_better")))
+  expect_true(is.na(step3_offset_share(0.30, 0.32, 0.33, "lower_is_better")))
+  expect_true(is.na(step3_offset_share(0.30, 0.32, 0.28, "unknown")))
+  expect_true(is.na(step3_offset_share(NA_real_, 0.32, 0.28, "lower_is_better")))
+})
+
+test_that("expected policy effect card states the offset share when climate worsens the metric", {
+  summary <- tibble::tibble(
+    scenario = c("Historical", "SSP2-4.5 / 2030-2040"),
+    baseline = c(0.30, 0.32), policy = c(0.30, 0.28), value = c(0, -0.04),
+    intermod_lo = c(0, -0.04), intermod_hi = c(0, -0.04), n_models = c(1L, 2L)
+  )
+  spec <- metric_metadata("headcount_ratio",
+    list(name = "welfare", type = "numeric", units = "PPP"),
+    pov_line = 3, weighted = TRUE, analysis_unit = "hh")
+  cards <- step3_headline_cards(summary, method = "headcount_ratio",
+    so = list(name = "welfare", type = "numeric", units = "PPP"), metric_context = spec)
+  expect_equal(cards[[1]]$offset_share, 2)
+  expect_match(cards[[1]]$note, "more than offsets climate change (2.0×)", fixed = TRUE)
+  expect_match(cards[[1]]$info, "Offset share", fixed = TRUE)
+})
+
+test_that("Step 3 first two cards translate rate changes into the number of poor", {
+  summary <- tibble::tibble(
+    scenario = c("Historical", "SSP2-4.5 / 2030-2040"),
+    baseline = c(0.30, 0.32), policy = c(0.30, 0.28), value = c(0, -0.04),
+    intermod_lo = c(0, -0.04), intermod_hi = c(0, -0.04), n_models = c(1L, 2L)
+  )
+  metric <- list(
+    status = "ok", reason = NULL,
+    metadata = list(method = "headcount_ratio", label = "Poverty rate", format = "percent",
+      display_multiplier = 100, change_unit = "pp", level_unit = "percent",
+      repositioning_modeled = TRUE, interaction_included = TRUE),
+    scenarios = list("SSP2-4.5 / 2030-2040" = list(status = "ok", summary = data.frame(
+      scenario = "SSP2-4.5 / 2030-2040", baseline = .32, after_main = .30,
+      after_repositioning = .29, policy = .28, main = -.02,
+      repositioning = -.01, interaction = -.01, resilience = -.02, total = -.04))),
+    return_period = data.frame(scenario = "SSP2-4.5 / 2030-2040", return_period = 20,
+      scope = "baseline_anchored", status = "ok", total = -.08,
+      main = -.02, resilience = -.06, repositioning = -.01, interaction = -.05),
+    mechanisms = list(repositioning_status = "modeled", interaction_status = "included")
+  )
+  svy <- data.frame(weight = rep(1000, 100))
+  cards <- step3_headline_cards(summary, method = "headcount_ratio",
+    metric_decomposition = metric, baseline_svy = svy)
+  # 100,000 people: -4 pp = 4.0K fewer poor; resilience -6 pp = 6.0K fewer poor.
+  expect_match(cards[[1]]$note, "\u2248 4.0K fewer poor", fixed = TRUE)
+  expect_match(cards[[2]]$note, "\u2248 6.0K fewer poor", fixed = TRUE)
+  # Not for other metrics, and not without weights.
+  mean_cards <- step3_headline_cards(summary, method = "mean", baseline_svy = svy)
+  expect_false(grepl("poor", mean_cards[[1]]$note, fixed = TRUE))
+  none <- step3_headline_cards(summary, method = "headcount_ratio", metric_decomposition = metric)
+  expect_false(grepl("poor", none[[1]]$note, fixed = TRUE))
+})
+
+test_that("poor_change_text formats and suppresses sensibly", {
+  expect_identical(poor_change_text(0.04, 50000), "\u2248 2.0K more poor")
+  expect_identical(poor_change_text(-0.0123, 8e6), "\u2248 98.4K fewer poor")
+  expect_null(poor_change_text(0.04, NA_real_))
+  expect_null(poor_change_text(NA_real_, 1000))
+  expect_null(poor_change_text(1e-9, 1000))
+})
+
+test_that("Step 3 expected effect card prints the 95% CI from the paired coefficient SD", {
+  summary <- tibble::tibble(
+    scenario = c("Historical", "SSP2-4.5 / 2030-2040"),
+    baseline = c(0.30, 0.32), policy = c(0.30, 0.28), value = c(0, -0.04),
+    intermod_lo = c(0, -0.04), intermod_hi = c(0, -0.04), n_models = c(1L, 2L),
+    coef_sd = c(0, 0.01)
+  )
+  spec <- metric_metadata("headcount_ratio",
+    list(name = "welfare", type = "numeric", units = "PPP"),
+    pov_line = 3, weighted = TRUE, analysis_unit = "hh")
+  cards <- step3_headline_cards(summary, method = "headcount_ratio",
+    so = list(name = "welfare", type = "numeric", units = "PPP"), metric_context = spec)
+  # -4.00 pp +/- 1.96 * 1.00 pp.
+  expect_match(cards[[1]]$note, "(95% CI: -5.96 to -2.04 pp)", fixed = TRUE)
+  expect_equal(cards[[1]]$effect_ci_native, -0.04 + c(-1, 1) * stats::qnorm(0.975) * 0.01)
+  expect_match(cards[[1]]$info, "weather coefficients only", fixed = TRUE)
+  # Without a coefficient SD the generic line stays.
+  summary$coef_sd <- NULL
+  plain <- step3_headline_cards(summary, method = "headcount_ratio",
+    so = list(name = "welfare", type = "numeric", units = "PPP"), metric_context = spec)
+  expect_match(plain[[1]]$note, "Policy vs baseline", fixed = TRUE)
+  expect_false(grepl("95% CI", plain[[1]]$note, fixed = TRUE))
 })

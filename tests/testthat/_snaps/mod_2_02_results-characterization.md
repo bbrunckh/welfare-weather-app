@@ -3277,34 +3277,39 @@
             "names": {
               "type": "character",
               "attributes": {},
-              "value": ["label", "value", "note", "note_html", "info", "value_native", "change_native", "change_display", "metadata", "deviation", "summary_method"]
+              "value": ["label", "value", "note", "note_html", "info", "basis_text", "value_native", "change_native", "change_ci_native", "change_display", "metadata", "deviation", "summary_method"]
             }
           },
           "value": [
             {
               "type": "character",
               "attributes": {},
-              "value": ["Expected outcome"]
+              "value": ["Expected change"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["4.05 vs 4.05"]
+              "value": ["-0.00 outcome units"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Historical vs SSP · Average year · Difference: -0.00 outcome units"]
+              "value": ["4.05 → 4.05 · (95% CI: -0.03 to +0.03 outcome units) · Historical → SSP2-4.5 / 2030-2050 · average year · Difference: -0.00 outcome units"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>Historical vs SSP<\/div>\n<div style=\"font-weight: 600;\">Average year<\/div>\n<div>Difference: -0.00 outcome units<\/div>"]
+              "value": ["<div>4.05 → 4.05<\/div>\n<div>(95% CI: -0.03 to +0.03 outcome units)<\/div>\n<div style=\"font-weight: 600;\">Historical → SSP2-4.5 / 2030-2050 · average year<\/div>"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Expected annual aggregate outcome under the historical baseline compared with the focus climate scenario (mean across weather years and climate models). Differences reflect simulated climate conditions for the fixed survey population. welfare: Mean. currency/unit basis unavailable; welfare/time basis unavailable. survey weights applied; expansion semantics unknown"]
+              "value": ["Expected annual aggregate outcome under the focus climate scenario compared with the historical baseline (mean across weather years and climate models). Differences reflect simulated climate conditions for the fixed survey population. Short-run weather responses estimated in Step 1 are applied to future weather; adaptation is not included. The 95% interval reflects uncertainty in the estimated weather coefficients only; climate-model disagreement and year-to-year weather variability are shown on the Signal vs noise and Year-to-year range cards. Weather values outside the historical range need extrapolation: the Diagnostics tab flags them under weather support. Historical: 4.05. Scenario: 4.05. welfare: Mean. currency/unit basis unavailable; welfare/time basis unavailable. survey weights applied; expansion semantics unknown"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["Short-run weather response; adaptation not included"]
             },
             {
               "type": "double",
@@ -3315,6 +3320,11 @@
               "type": "double",
               "attributes": {},
               "value": [-0.00021794]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [-0.02989259, 0.02945672]
             },
             {
               "type": "character",
@@ -3481,7 +3491,7 @@
             "names": {
               "type": "character",
               "attributes": {},
-              "value": ["label", "value", "note", "note_html", "info", "value_native", "change_native", "change_display", "metadata", "deviation", "summary_method"]
+              "value": ["label", "value", "note", "note_html", "info", "value_native", "change_native", "change_display", "return_period_native", "status", "metadata", "deviation", "summary_method"]
             }
           },
           "value": [
@@ -3493,22 +3503,22 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["3.52 vs 3.36"]
+              "value": ["-0.17 outcome units"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Historical vs SSP · 1-in-20 year · Difference: -0.17 outcome units"]
+              "value": ["3.52 → 3.36 · Historical 1-in-20 year → about 1-in-6 in SSP2-4.5 / 2030-2050 · Difference: -0.17 outcome units"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>Historical vs SSP<\/div>\n<div style=\"font-weight: 600;\">1-in-20 year<\/div>\n<div>Difference: -0.17 outcome units<\/div>"]
+              "value": ["<div>3.52 → 3.36<\/div>\n<div style=\"font-weight: 600;\">Historical 1-in-20 year → about 1-in-6 in SSP2-4.5 / 2030-2050<\/div>"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Simulated aggregate outcome in adverse 1-in-20 weather years under the historical baseline compared with the focus climate regime. A 1-in-20 year event occurs in approximately 5% of simulated weather years. The adverse tail is determined automatically by the selected metric. Thresholds use the median across climate models, not the equal-model-mean expected headline. welfare: Mean. currency/unit basis unavailable; welfare/time basis unavailable. survey weights applied; expansion semantics unknown"]
+              "value": ["Simulated aggregate outcome in adverse 1-in-20 weather years under the historical baseline compared with the focus climate regime. A 1-in-20 year event occurs in approximately 5% of simulated weather years. The adverse tail is determined automatically by the selected metric. Thresholds use the median across climate models, not the equal-model-mean expected headline. Return-period shift: the share of simulated model-years under the focus scenario at or beyond the historical 1-in-20 level gives the new frequency (about 1-in-6). Historical: 3.52. Scenario: 3.36. welfare: Mean. currency/unit basis unavailable; welfare/time basis unavailable. survey weights applied; expansion semantics unknown"]
             },
             {
               "type": "double",
@@ -3524,6 +3534,33 @@
               "type": "character",
               "attributes": {},
               "value": ["-0.17 outcome units"]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [6.3]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["kind", "text"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["adverse"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Adverse"]
+                }
+              ]
             },
             {
               "type": "list",
@@ -3685,6 +3722,227 @@
             "names": {
               "type": "character",
               "attributes": {},
+              "value": ["label", "value", "note", "note_html", "info", "value_range_native", "snr_native", "status", "metadata", "deviation", "summary_method"]
+            }
+          },
+          "value": [
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["Signal vs noise"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["1 of 3 models"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["agree on direction of change · Shift is 0.0× the usual year-to-year swing · SSP2-4.5 / 2030-2050"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["<div>agree on direction of change<\/div>\n<div>Shift is 0.0× the usual year-to-year swing<\/div>\n<div style=\"font-weight: 600;\">SSP2-4.5 / 2030-2050<\/div>"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["Share of CMIP6 climate models whose average change for the focus scenario has the same sign as the ensemble change; 80% or more is flagged as robust. The second line compares the size of the climate shift with the standard deviation of historical year-to-year outcomes, that is the usual swing between one weather year and the next (a shift well below 1× is hard to distinguish from ordinary weather variability). Range of model averages: 3.63 to 4.43.  Model spread is evaluated at the central coefficient estimates."]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [3.63225947, 4.42972395]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [0.00052214]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["kind", "text"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["uncertain"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Models disagree"]
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["label", "native_unit", "format", "direction", "change_kind", "percent_change", "poverty_line", "engines", "uncertainty", "caveat", "method", "direction_known", "adverse_tail", "adverse_note", "valid_transform", "unit", "level_unit", "change_unit", "display_multiplier", "weight_interpretation", "weighted", "outcome_name", "outcome_type", "uses_poverty_line", "threshold_kind", "missing_context"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Mean"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["outcome units"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["number"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["higher_is_better"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["absolute"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [false]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["ols", "rif"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["coefficient", "weather", "ensemble"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Weighted annual aggregate for the fixed survey population."]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["mean"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["low"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Lower values are adverse"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["percent change for log effects"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["outcome units"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["outcome units"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["outcome units"]
+                },
+                {
+                  "type": "double",
+                  "attributes": {},
+                  "value": [1]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["survey weights applied; expansion semantics unknown"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["welfare"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["numeric"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [false]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["none"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["currency/unit basis unavailable", "welfare/time basis unavailable"]
+                }
+              ]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["none"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["equal_model_mean"]
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "attributes": {
+            "names": {
+              "type": "character",
+              "attributes": {},
               "value": ["label", "value", "note", "note_html", "info", "value_range_native", "metadata", "deviation", "summary_method"]
             }
           },
@@ -3692,7 +3950,7 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["Range across years"]
+              "value": ["Year-to-year range"]
             },
             {
               "type": "character",
@@ -3702,12 +3960,12 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["Hist: 3.49 to 4.99 · Inter-annual weather variability"]
+              "value": ["Hist: 3.49 to 4.99 · SSP2-4.5 / 2030-2050"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>Hist: 3.49 to 4.99<\/div>\n<div style=\"font-weight: 600;\">Inter-annual weather variability<\/div>"]
+              "value": ["<div>Hist: 3.49 to 4.99<\/div>\n<div style=\"font-weight: 600;\">SSP2-4.5 / 2030-2050<\/div>"]
             },
             {
               "type": "character",
@@ -3879,201 +4137,7 @@
             "names": {
               "type": "character",
               "attributes": {},
-              "value": ["label", "value", "note", "note_html", "info", "value_range_native", "metadata", "deviation", "summary_method"]
-            }
-          },
-          "value": [
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["Climate-model spread"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["3.63 to 4.43"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["Full range across 3 models · CMIP6 model disagreement"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["<div>Full range across 3 models<\/div>\n<div style=\"font-weight: 600;\">CMIP6 model disagreement<\/div>"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["Range of expected annual aggregate outcomes across CMIP6 climate models for the focus scenario. Reflects climate projection disagreement, evaluated at the central expected outcome."]
-            },
-            {
-              "type": "double",
-              "attributes": {},
-              "value": [3.63225947, 4.42972395]
-            },
-            {
-              "type": "list",
-              "attributes": {
-                "names": {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["label", "native_unit", "format", "direction", "change_kind", "percent_change", "poverty_line", "engines", "uncertainty", "caveat", "method", "direction_known", "adverse_tail", "adverse_note", "valid_transform", "unit", "level_unit", "change_unit", "display_multiplier", "weight_interpretation", "weighted", "outcome_name", "outcome_type", "uses_poverty_line", "threshold_kind", "missing_context"]
-                }
-              },
-              "value": [
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["Mean"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["outcome units"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["number"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["higher_is_better"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["absolute"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [false]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["ols", "rif"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["coefficient", "weather", "ensemble"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["Weighted annual aggregate for the fixed survey population."]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["mean"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["low"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["Lower values are adverse"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["percent change for log effects"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["outcome units"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["outcome units"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["outcome units"]
-                },
-                {
-                  "type": "double",
-                  "attributes": {},
-                  "value": [1]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["survey weights applied; expansion semantics unknown"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["welfare"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["numeric"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [false]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["none"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["currency/unit basis unavailable", "welfare/time basis unavailable"]
-                }
-              ]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["none"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["equal_model_mean"]
-            }
-          ]
-        },
-        {
-          "type": "list",
-          "attributes": {
-            "names": {
-              "type": "character",
-              "attributes": {},
-              "value": ["label", "value", "note", "note_html", "class", "info", "value_native", "prediction_count_native", "prediction_count_note", "prediction_sample_rows", "metadata", "deviation", "summary_method"]
+              "value": ["label", "value", "note", "note_html", "class", "basis_only", "basis_text", "info", "value_native", "prediction_count_native", "prediction_count_note", "prediction_sample_rows", "metadata", "deviation", "summary_method"]
             }
           },
           "value": [
@@ -4090,17 +4154,27 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["(2 SSPs × 3 models + 1 historical) × 21 yrs · Unavailable"]
+              "value": ["2 scenarios, 2–3 models and 21 yrs each · Unavailable"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>(2 SSPs × 3 models + 1 historical) × 21 yrs<\/div>\n<div style=\"font-weight: 600;\">Unavailable<\/div>"]
+              "value": ["<div>2 scenarios, 2–3 models and 21 yrs each<\/div>\n<div style=\"font-weight: 600;\">Unavailable<\/div>"]
             },
             {
               "type": "character",
               "attributes": {},
               "value": ["neutral"]
+            },
+            {
+              "type": "logical",
+              "attributes": {},
+              "value": [true]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["127 simulation years: 2 scenarios, 2–3 models and 21 yrs each · Unavailable"]
             },
             {
               "type": "character",
@@ -7563,34 +7637,39 @@
             "names": {
               "type": "character",
               "attributes": {},
-              "value": ["label", "value", "note", "note_html", "info", "value_native", "change_native", "change_display", "metadata", "deviation", "summary_method"]
+              "value": ["label", "value", "note", "note_html", "info", "basis_text", "value_native", "change_native", "change_ci_native", "change_display", "metadata", "deviation", "summary_method"]
             }
           },
           "value": [
             {
               "type": "character",
               "attributes": {},
-              "value": ["Expected outcome"]
+              "value": ["Expected change"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["+0.00 outcome units vs -0.00 outcome units"]
+              "value": ["-0.00 outcome units"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Difference from historical mean · Historical vs SSP · Average year · Difference: -0.00 outcome units"]
+              "value": ["Difference from historical mean · (95% CI: -0.03 to +0.03 outcome units) · Historical → SSP2-4.5 / 2030-2050 · average year · Difference: -0.00 outcome units"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>Difference from historical mean · Historical vs SSP<\/div>\n<div style=\"font-weight: 600;\">Average year<\/div>\n<div>Difference: -0.00 outcome units<\/div>"]
+              "value": ["<div>Difference from historical mean<\/div>\n<div>(95% CI: -0.03 to +0.03 outcome units)<\/div>\n<div style=\"font-weight: 600;\">Historical → SSP2-4.5 / 2030-2050 · average year<\/div>"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Expected annual aggregate outcome under the historical baseline compared with the focus climate scenario (mean across weather years and climate models). Differences reflect simulated climate conditions for the fixed survey population. welfare: Mean. currency/unit basis unavailable; welfare/time basis unavailable. survey weights applied; expansion semantics unknown"]
+              "value": ["Expected annual aggregate outcome under the focus climate scenario compared with the historical baseline (mean across weather years and climate models). Differences reflect simulated climate conditions for the fixed survey population. Short-run weather responses estimated in Step 1 are applied to future weather; adaptation is not included. The 95% interval reflects uncertainty in the estimated weather coefficients only; climate-model disagreement and year-to-year weather variability are shown on the Signal vs noise and Year-to-year range cards. Weather values outside the historical range need extrapolation: the Diagnostics tab flags them under weather support. Historical: +0.00 outcome units. Scenario: -0.00 outcome units. welfare: Mean. currency/unit basis unavailable; welfare/time basis unavailable. survey weights applied; expansion semantics unknown"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["Short-run weather response; adaptation not included"]
             },
             {
               "type": "double",
@@ -7601,6 +7680,11 @@
               "type": "double",
               "attributes": {},
               "value": [-0.00021794]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [-0.02989259, 0.02945672]
             },
             {
               "type": "character",
@@ -7767,7 +7851,7 @@
             "names": {
               "type": "character",
               "attributes": {},
-              "value": ["label", "value", "note", "note_html", "info", "value_native", "change_native", "change_display", "metadata", "deviation", "summary_method"]
+              "value": ["label", "value", "note", "note_html", "info", "value_native", "change_native", "change_display", "return_period_native", "status", "metadata", "deviation", "summary_method"]
             }
           },
           "value": [
@@ -7779,22 +7863,22 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["-0.53 vs -0.70"]
+              "value": ["-0.17 outcome units"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Difference from historical mean · Historical vs SSP · 1-in-20 year · Difference: -0.17 outcome units"]
+              "value": ["Difference from historical mean · Historical 1-in-20 year → about 1-in-6 in SSP2-4.5 / 2030-2050 · Difference: -0.17 outcome units"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>Difference from historical mean · Historical vs SSP<\/div>\n<div style=\"font-weight: 600;\">1-in-20 year<\/div>\n<div>Difference: -0.17 outcome units<\/div>"]
+              "value": ["<div>Difference from historical mean<\/div>\n<div style=\"font-weight: 600;\">Historical 1-in-20 year → about 1-in-6 in SSP2-4.5 / 2030-2050<\/div>"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Simulated aggregate outcome in adverse 1-in-20 weather years under the historical baseline compared with the focus climate regime. A 1-in-20 year event occurs in approximately 5% of simulated weather years. The adverse tail is determined automatically by the selected metric. Thresholds use the median across climate models, not the equal-model-mean expected headline. welfare: Mean. currency/unit basis unavailable; welfare/time basis unavailable. survey weights applied; expansion semantics unknown"]
+              "value": ["Simulated aggregate outcome in adverse 1-in-20 weather years under the historical baseline compared with the focus climate regime. A 1-in-20 year event occurs in approximately 5% of simulated weather years. The adverse tail is determined automatically by the selected metric. Thresholds use the median across climate models, not the equal-model-mean expected headline. Return-period shift: the share of simulated model-years under the focus scenario at or beyond the historical 1-in-20 level gives the new frequency (about 1-in-6). Historical: -0.53. Scenario: -0.70. welfare: Mean. currency/unit basis unavailable; welfare/time basis unavailable. survey weights applied; expansion semantics unknown"]
             },
             {
               "type": "double",
@@ -7810,6 +7894,33 @@
               "type": "character",
               "attributes": {},
               "value": ["-0.17 outcome units"]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [6.3]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["kind", "text"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["adverse"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Adverse"]
+                }
+              ]
             },
             {
               "type": "list",
@@ -7971,6 +8082,227 @@
             "names": {
               "type": "character",
               "attributes": {},
+              "value": ["label", "value", "note", "note_html", "info", "value_range_native", "snr_native", "status", "metadata", "deviation", "summary_method"]
+            }
+          },
+          "value": [
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["Signal vs noise"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["1 of 3 models"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["agree on direction of change · Shift is 0.0× the usual year-to-year swing · SSP2-4.5 / 2030-2050"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["<div>agree on direction of change<\/div>\n<div>Shift is 0.0× the usual year-to-year swing<\/div>\n<div style=\"font-weight: 600;\">SSP2-4.5 / 2030-2050<\/div>"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["Share of CMIP6 climate models whose average change for the focus scenario has the same sign as the ensemble change; 80% or more is flagged as robust. The second line compares the size of the climate shift with the standard deviation of historical year-to-year outcomes, that is the usual swing between one weather year and the next (a shift well below 1× is hard to distinguish from ordinary weather variability). Range of model averages: -0.42 outcome units to +0.38 outcome units.  Model spread is evaluated at the central coefficient estimates."]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [-0.41952513, 0.37793935]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [0.00052214]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["kind", "text"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["uncertain"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Models disagree"]
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["label", "native_unit", "format", "direction", "change_kind", "percent_change", "poverty_line", "engines", "uncertainty", "caveat", "method", "direction_known", "adverse_tail", "adverse_note", "valid_transform", "unit", "level_unit", "change_unit", "display_multiplier", "weight_interpretation", "weighted", "outcome_name", "outcome_type", "uses_poverty_line", "threshold_kind", "missing_context"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Mean"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["outcome units"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["number"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["higher_is_better"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["absolute"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [false]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["ols", "rif"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["coefficient", "weather", "ensemble"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Weighted annual aggregate for the fixed survey population."]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["mean"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["low"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Lower values are adverse"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["percent change for log effects"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["outcome units"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["outcome units"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["outcome units"]
+                },
+                {
+                  "type": "double",
+                  "attributes": {},
+                  "value": [1]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["survey weights applied; expansion semantics unknown"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["welfare"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["numeric"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [false]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["none"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["currency/unit basis unavailable", "welfare/time basis unavailable"]
+                }
+              ]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["mean"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["equal_model_mean"]
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "attributes": {
+            "names": {
+              "type": "character",
+              "attributes": {},
               "value": ["label", "value", "note", "note_html", "info", "value_range_native", "metadata", "deviation", "summary_method"]
             }
           },
@@ -7978,7 +8310,7 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["Range across years"]
+              "value": ["Year-to-year range"]
             },
             {
               "type": "character",
@@ -7988,12 +8320,12 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["Hist: -0.57 outcome units to +0.94 outcome units · Inter-annual weather variability"]
+              "value": ["Hist: -0.57 outcome units to +0.94 outcome units · SSP2-4.5 / 2030-2050"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>Hist: -0.57 outcome units to +0.94 outcome units<\/div>\n<div style=\"font-weight: 600;\">Inter-annual weather variability<\/div>"]
+              "value": ["<div>Hist: -0.57 outcome units to +0.94 outcome units<\/div>\n<div style=\"font-weight: 600;\">SSP2-4.5 / 2030-2050<\/div>"]
             },
             {
               "type": "character",
@@ -8165,201 +8497,7 @@
             "names": {
               "type": "character",
               "attributes": {},
-              "value": ["label", "value", "note", "note_html", "info", "value_range_native", "metadata", "deviation", "summary_method"]
-            }
-          },
-          "value": [
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["Climate-model spread"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["-0.42 outcome units to +0.38 outcome units"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["Full range across 3 models · CMIP6 model disagreement"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["<div>Full range across 3 models<\/div>\n<div style=\"font-weight: 600;\">CMIP6 model disagreement<\/div>"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["Range of expected annual aggregate outcomes across CMIP6 climate models for the focus scenario. Reflects climate projection disagreement, evaluated at the central expected outcome."]
-            },
-            {
-              "type": "double",
-              "attributes": {},
-              "value": [-0.41952513, 0.37793935]
-            },
-            {
-              "type": "list",
-              "attributes": {
-                "names": {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["label", "native_unit", "format", "direction", "change_kind", "percent_change", "poverty_line", "engines", "uncertainty", "caveat", "method", "direction_known", "adverse_tail", "adverse_note", "valid_transform", "unit", "level_unit", "change_unit", "display_multiplier", "weight_interpretation", "weighted", "outcome_name", "outcome_type", "uses_poverty_line", "threshold_kind", "missing_context"]
-                }
-              },
-              "value": [
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["Mean"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["outcome units"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["number"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["higher_is_better"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["absolute"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [false]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["ols", "rif"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["coefficient", "weather", "ensemble"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["Weighted annual aggregate for the fixed survey population."]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["mean"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["low"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["Lower values are adverse"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["percent change for log effects"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["outcome units"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["outcome units"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["outcome units"]
-                },
-                {
-                  "type": "double",
-                  "attributes": {},
-                  "value": [1]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["survey weights applied; expansion semantics unknown"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["welfare"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["numeric"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [false]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["none"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["currency/unit basis unavailable", "welfare/time basis unavailable"]
-                }
-              ]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["mean"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["equal_model_mean"]
-            }
-          ]
-        },
-        {
-          "type": "list",
-          "attributes": {
-            "names": {
-              "type": "character",
-              "attributes": {},
-              "value": ["label", "value", "note", "note_html", "class", "info", "value_native", "prediction_count_native", "prediction_count_note", "prediction_sample_rows", "metadata", "deviation", "summary_method"]
+              "value": ["label", "value", "note", "note_html", "class", "basis_only", "basis_text", "info", "value_native", "prediction_count_native", "prediction_count_note", "prediction_sample_rows", "metadata", "deviation", "summary_method"]
             }
           },
           "value": [
@@ -8376,17 +8514,27 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["(2 SSPs × 3 models + 1 historical) × 21 yrs · Unavailable"]
+              "value": ["2 scenarios, 2–3 models and 21 yrs each · Unavailable"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>(2 SSPs × 3 models + 1 historical) × 21 yrs<\/div>\n<div style=\"font-weight: 600;\">Unavailable<\/div>"]
+              "value": ["<div>2 scenarios, 2–3 models and 21 yrs each<\/div>\n<div style=\"font-weight: 600;\">Unavailable<\/div>"]
             },
             {
               "type": "character",
               "attributes": {},
               "value": ["neutral"]
+            },
+            {
+              "type": "logical",
+              "attributes": {},
+              "value": [true]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["127 simulation years: 2 scenarios, 2–3 models and 21 yrs each · Unavailable"]
             },
             {
               "type": "character",
@@ -11849,34 +11997,39 @@
             "names": {
               "type": "character",
               "attributes": {},
-              "value": ["label", "value", "note", "note_html", "info", "value_native", "change_native", "change_display", "metadata", "deviation", "summary_method"]
+              "value": ["label", "value", "note", "note_html", "info", "basis_text", "value_native", "change_native", "change_ci_native", "change_display", "status", "metadata", "deviation", "summary_method"]
             }
           },
           "value": [
             {
               "type": "character",
               "attributes": {},
-              "value": ["Expected outcome"]
+              "value": ["Expected change"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["+0.00 pp vs +5.36 pp"]
+              "value": ["+5.4 pp"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Difference from historical mean · Historical vs SSP · Average year · Difference: +5.36 pp"]
+              "value": ["Difference from historical mean · (95% CI: +3.6 to +7.2 pp) · Historical → SSP2-4.5 / 2030-2050 · average year · Difference: +5.4 pp"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>Difference from historical mean · Historical vs SSP<\/div>\n<div style=\"font-weight: 600;\">Average year<\/div>\n<div>Difference: +5.36 pp<\/div>"]
+              "value": ["<div>Difference from historical mean<\/div>\n<div>(95% CI: +3.6 to +7.2 pp)<\/div>\n<div style=\"font-weight: 600;\">Historical → SSP2-4.5 / 2030-2050 · average year<\/div>"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Expected annual aggregate outcome under the historical baseline compared with the focus climate scenario (mean across weather years and climate models). Differences reflect simulated climate conditions for the fixed survey population. welfare: Poverty rate. Poverty line 3 (outcome units). poverty-line welfare/time compatibility unavailable. survey weights applied; expansion semantics unknown"]
+              "value": ["Expected annual aggregate outcome under the focus climate scenario compared with the historical baseline (mean across weather years and climate models). Differences reflect simulated climate conditions for the fixed survey population. Short-run weather responses estimated in Step 1 are applied to future weather; adaptation is not included. The 95% interval reflects uncertainty in the estimated weather coefficients only; climate-model disagreement and year-to-year weather variability are shown on the Signal vs noise and Year-to-year range cards. Weather values outside the historical range need extrapolation: the Diagnostics tab flags them under weather support. Historical: +0.0 pp. Scenario: +5.4 pp. welfare: Poverty rate. Poverty line 3 (outcome units). poverty-line welfare/time compatibility unavailable. survey weights applied; expansion semantics unknown"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["Short-run weather response; adaptation not included"]
             },
             {
               "type": "double",
@@ -11889,9 +12042,36 @@
               "value": [0.05363155]
             },
             {
+              "type": "double",
+              "attributes": {},
+              "value": [0.03556611, 0.071697]
+            },
+            {
               "type": "character",
               "attributes": {},
-              "value": ["+5.36 pp"]
+              "value": ["+5.4 pp"]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["kind", "text"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["adverse"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Adverse"]
+                }
+              ]
             },
             {
               "type": "list",
@@ -12058,7 +12238,7 @@
             "names": {
               "type": "character",
               "attributes": {},
-              "value": ["label", "value", "note", "note_html", "info", "value_native", "change_native", "change_display", "metadata", "deviation", "summary_method"]
+              "value": ["label", "value", "note", "note_html", "info", "value_native", "change_native", "change_display", "return_period_native", "status", "metadata", "deviation", "summary_method"]
             }
           },
           "value": [
@@ -12070,22 +12250,22 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["30.15% vs 31.82%"]
+              "value": ["+1.7 pp"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Difference from historical mean · Historical vs SSP · 1-in-20 year · Difference: +1.67 pp"]
+              "value": ["Difference from historical mean · Historical 1-in-20 year → about 1-in-16 in SSP2-4.5 / 2030-2050 · Difference: +1.7 pp"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>Difference from historical mean · Historical vs SSP<\/div>\n<div style=\"font-weight: 600;\">1-in-20 year<\/div>\n<div>Difference: +1.67 pp<\/div>"]
+              "value": ["<div>Difference from historical mean<\/div>\n<div style=\"font-weight: 600;\">Historical 1-in-20 year → about 1-in-16 in SSP2-4.5 / 2030-2050<\/div>"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Simulated aggregate outcome in adverse 1-in-20 weather years under the historical baseline compared with the focus climate regime. A 1-in-20 year event occurs in approximately 5% of simulated weather years. The adverse tail is determined automatically by the selected metric. Thresholds use the median across climate models, not the equal-model-mean expected headline. welfare: Poverty rate. Poverty line 3 (outcome units). poverty-line welfare/time compatibility unavailable. survey weights applied; expansion semantics unknown"]
+              "value": ["Simulated aggregate outcome in adverse 1-in-20 weather years under the historical baseline compared with the focus climate regime. A 1-in-20 year event occurs in approximately 5% of simulated weather years. The adverse tail is determined automatically by the selected metric. Thresholds use the median across climate models, not the equal-model-mean expected headline. Return-period shift: the share of simulated model-years under the focus scenario at or beyond the historical 1-in-20 level gives the new frequency (about 1-in-16). Historical: 30.2%. Scenario: 31.8%. welfare: Poverty rate. Poverty line 3 (outcome units). poverty-line welfare/time compatibility unavailable. survey weights applied; expansion semantics unknown"]
             },
             {
               "type": "double",
@@ -12100,7 +12280,34 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["+1.67 pp"]
+              "value": ["+1.7 pp"]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [15.75]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["kind", "text"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["adverse"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Adverse"]
+                }
+              ]
             },
             {
               "type": "list",
@@ -12267,6 +12474,232 @@
             "names": {
               "type": "character",
               "attributes": {},
+              "value": ["label", "value", "note", "note_html", "info", "value_range_native", "snr_native", "status", "metadata", "deviation", "summary_method"]
+            }
+          },
+          "value": [
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["Signal vs noise"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["2 of 3 models"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["agree on direction of change · Shift is 0.4× the usual year-to-year swing · SSP2-4.5 / 2030-2050"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["<div>agree on direction of change<\/div>\n<div>Shift is 0.4× the usual year-to-year swing<\/div>\n<div style=\"font-weight: 600;\">SSP2-4.5 / 2030-2050<\/div>"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["Share of CMIP6 climate models whose average change for the focus scenario has the same sign as the ensemble change; 80% or more is flagged as robust. The second line compares the size of the climate shift with the standard deviation of historical year-to-year outcomes, that is the usual swing between one weather year and the next (a shift well below 1× is hard to distinguish from ordinary weather variability). Range of model averages: -3.5 pp to +14.4 pp.  Model spread is evaluated at the central coefficient estimates."]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [-0.03499278, 0.14357864]
+            },
+            {
+              "type": "double",
+              "attributes": {},
+              "value": [0.38307501]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["kind", "text"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["uncertain"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Models disagree"]
+                }
+              ]
+            },
+            {
+              "type": "list",
+              "attributes": {
+                "names": {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["label", "native_unit", "format", "direction", "change_kind", "poverty_line", "engines", "uncertainty", "caveat", "method", "direction_known", "adverse_tail", "adverse_note", "valid_transform", "unit", "level_unit", "change_unit", "display_multiplier", "weight_interpretation", "weighted", "outcome_name", "outcome_type", "uses_poverty_line", "threshold_kind", "threshold_value", "threshold_unit", "missing_context"]
+                }
+              },
+              "value": [
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Poverty rate"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["fraction"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["percent"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["lower_is_better"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["percentage_points"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["ols", "rif"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["coefficient", "weather", "ensemble"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Share below the selected poverty line; changes are percentage points."]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["headcount_ratio"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["high"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["Higher values are adverse"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["percentage points"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["percent"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["percent"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["pp"]
+                },
+                {
+                  "type": "double",
+                  "attributes": {},
+                  "value": [100]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["survey weights applied; expansion semantics unknown"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["welfare"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["numeric"]
+                },
+                {
+                  "type": "logical",
+                  "attributes": {},
+                  "value": [true]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["selected poverty line"]
+                },
+                {
+                  "type": "double",
+                  "attributes": {},
+                  "value": [3]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["outcome units"]
+                },
+                {
+                  "type": "character",
+                  "attributes": {},
+                  "value": ["poverty-line welfare/time compatibility unavailable"]
+                }
+              ]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["mean"]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["equal_model_mean"]
+            }
+          ]
+        },
+        {
+          "type": "list",
+          "attributes": {
+            "names": {
+              "type": "character",
+              "attributes": {},
               "value": ["label", "value", "note", "note_html", "info", "value_range_native", "metadata", "deviation", "summary_method"]
             }
           },
@@ -12274,22 +12707,22 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["Range across years"]
+              "value": ["Year-to-year range"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["-9.85 pp to +31.82 pp"]
+              "value": ["-9.8 pp to +31.8 pp"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["Hist: -9.85 pp to +40.15 pp · Inter-annual weather variability"]
+              "value": ["Hist: -9.8 pp to +40.2 pp · SSP2-4.5 / 2030-2050"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>Hist: -9.85 pp to +40.15 pp<\/div>\n<div style=\"font-weight: 600;\">Inter-annual weather variability<\/div>"]
+              "value": ["<div>Hist: -9.8 pp to +40.2 pp<\/div>\n<div style=\"font-weight: 600;\">SSP2-4.5 / 2030-2050<\/div>"]
             },
             {
               "type": "character",
@@ -12466,206 +12899,7 @@
             "names": {
               "type": "character",
               "attributes": {},
-              "value": ["label", "value", "note", "note_html", "info", "value_range_native", "metadata", "deviation", "summary_method"]
-            }
-          },
-          "value": [
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["Climate-model spread"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["-3.50 pp to +14.36 pp"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["Full range across 3 models · CMIP6 model disagreement"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["<div>Full range across 3 models<\/div>\n<div style=\"font-weight: 600;\">CMIP6 model disagreement<\/div>"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["Range of expected annual aggregate outcomes across CMIP6 climate models for the focus scenario. Reflects climate projection disagreement, evaluated at the central expected outcome."]
-            },
-            {
-              "type": "double",
-              "attributes": {},
-              "value": [-0.03499278, 0.14357864]
-            },
-            {
-              "type": "list",
-              "attributes": {
-                "names": {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["label", "native_unit", "format", "direction", "change_kind", "poverty_line", "engines", "uncertainty", "caveat", "method", "direction_known", "adverse_tail", "adverse_note", "valid_transform", "unit", "level_unit", "change_unit", "display_multiplier", "weight_interpretation", "weighted", "outcome_name", "outcome_type", "uses_poverty_line", "threshold_kind", "threshold_value", "threshold_unit", "missing_context"]
-                }
-              },
-              "value": [
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["Poverty rate"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["fraction"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["percent"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["lower_is_better"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["percentage_points"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["ols", "rif"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["coefficient", "weather", "ensemble"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["Share below the selected poverty line; changes are percentage points."]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["headcount_ratio"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["high"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["Higher values are adverse"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["percentage points"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["percent"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["percent"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["pp"]
-                },
-                {
-                  "type": "double",
-                  "attributes": {},
-                  "value": [100]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["survey weights applied; expansion semantics unknown"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["welfare"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["numeric"]
-                },
-                {
-                  "type": "logical",
-                  "attributes": {},
-                  "value": [true]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["selected poverty line"]
-                },
-                {
-                  "type": "double",
-                  "attributes": {},
-                  "value": [3]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["outcome units"]
-                },
-                {
-                  "type": "character",
-                  "attributes": {},
-                  "value": ["poverty-line welfare/time compatibility unavailable"]
-                }
-              ]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["mean"]
-            },
-            {
-              "type": "character",
-              "attributes": {},
-              "value": ["equal_model_mean"]
-            }
-          ]
-        },
-        {
-          "type": "list",
-          "attributes": {
-            "names": {
-              "type": "character",
-              "attributes": {},
-              "value": ["label", "value", "note", "note_html", "class", "info", "value_native", "prediction_count_native", "prediction_count_note", "prediction_sample_rows", "metadata", "deviation", "summary_method"]
+              "value": ["label", "value", "note", "note_html", "class", "basis_only", "basis_text", "info", "value_native", "prediction_count_native", "prediction_count_note", "prediction_sample_rows", "metadata", "deviation", "summary_method"]
             }
           },
           "value": [
@@ -12682,17 +12916,27 @@
             {
               "type": "character",
               "attributes": {},
-              "value": ["(2 SSPs × 3 models + 1 historical) × 21 yrs · Unavailable"]
+              "value": ["2 scenarios, 2–3 models and 21 yrs each · Unavailable"]
             },
             {
               "type": "character",
               "attributes": {},
-              "value": ["<div>(2 SSPs × 3 models + 1 historical) × 21 yrs<\/div>\n<div style=\"font-weight: 600;\">Unavailable<\/div>"]
+              "value": ["<div>2 scenarios, 2–3 models and 21 yrs each<\/div>\n<div style=\"font-weight: 600;\">Unavailable<\/div>"]
             },
             {
               "type": "character",
               "attributes": {},
               "value": ["neutral"]
+            },
+            {
+              "type": "logical",
+              "attributes": {},
+              "value": [true]
+            },
+            {
+              "type": "character",
+              "attributes": {},
+              "value": ["127 simulation years: 2 scenarios, 2–3 models and 21 yrs each · Unavailable"]
             },
             {
               "type": "character",

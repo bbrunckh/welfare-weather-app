@@ -126,6 +126,23 @@
   }
 }
 
+# Contrast wording for a continuous weather term, in physical units where the
+# variable has them: "per +1 SD (= 1.8 \u00b0C)".
+.s1_sd_contrast_label <- function(snap, var, sd) {
+  unit <- NULL
+  w <- snap$weather
+  if (!is.null(w) && !is.null(w$name) && !is.null(w$units) &&
+    var %in% as.character(w$name)) {
+    unit <- trimws(as.character(w$units[w$name == var][1]))
+  }
+  amount <- format(signif(sd, 2), trim = TRUE, scientific = FALSE)
+  paste0(
+    "per +1 SD (= ", amount,
+    if (!is.null(unit) && !is.na(unit) && nzchar(unit)) paste0(" ", unit) else "",
+    ")"
+  )
+}
+
 .s1_bin_lower <- function(bin_cols, pred_var) {
   s <- sub(paste0("^", .s1_esc(pred_var), "[\\[\\(]"), "", bin_cols)
   suppressWarnings(as.numeric(sub("^([^,]+),.*", "\\1", s)))
@@ -319,7 +336,7 @@
       contrast_label <- if (binned) {
         .s1_bin_contrast_label(snap, var, top_bin)
       } else {
-        paste0("+1 SD of ", .s1_weather_label(snap, var))
+        .s1_sd_contrast_label(snap, var, xd$sd)
       }
 
       is_logit <- is_logistic_fit(mf)
@@ -421,8 +438,50 @@
       if (!length(sc)) {
         return(NULL)
       }
+
+      # Upper-tail contrast for polynomial terms (median -> 95th percentile),
+      # built from the same model matrix, coefficients and vcov so the shape
+      # card costs two design rows and one quadratic form per variable.
+      shape <- NULL
+      has_poly <- !binned && any(vapply(2:3, function(k) {
+        !is.na(.s1_poly_col(names(mm), var, k))
+      }, logical(1)))
+      if (has_poly) {
+        x_all <- suppressWarnings(as.numeric(td[[var]]))
+        x_all <- x_all[is.finite(x_all)]
+        x_lo <- stats::median(x_all)
+        x_hi <- as.numeric(stats::quantile(x_all, 0.95, names = FALSE))
+        mv1 <- modx_vals[[1]]
+        r_hi <- .s1_design_row(mm, var,
+          x = x_hi, modx_var = modx_var,
+          modx_value = mv1$value, base_row = base_row
+        )
+        r_lo <- .s1_design_row(mm, var,
+          x = x_lo, modx_var = modx_var,
+          modx_value = mv1$value, base_row = base_row
+        )
+        w <- r_hi - r_lo
+        common <- intersect(names(w), names(beta))
+        if (length(common) && x_hi > x_lo) {
+          wc <- w[common]
+          se <- tryCatch(
+            sqrt(max(drop(t(wc) %*% V[common, common, drop = FALSE] %*% wc), 0)),
+            error = function(e) NA_real_
+          )
+          shape <- list(
+            entry = list(
+              value = mv1$value, label = mv1$label,
+              estimate = sum(wc * beta[common]), se = se,
+              xb_lo = sc[[1]]$xb_lo,
+              w = wc, cols = common, V = V, is_logit = is_logit
+            ),
+            x_lo = x_lo, x_hi = x_hi
+          )
+        }
+      }
       attr(sc, "contrast_label") <- contrast_label
       attr(sc, "profile_note") <- profile_note
+      attr(sc, "shape") <- shape
       sc
     },
     error = function(e) NULL
@@ -504,7 +563,7 @@
       contrast_label <- if (binned) {
         .s1_bin_contrast_label(snap, var, top_bin)
       } else {
-        paste0("+1 SD of ", .s1_weather_label(snap, var))
+        .s1_sd_contrast_label(snap, var, xd$sd)
       }
 
       term_value <- function(t, x, mv, bin) {
@@ -781,6 +840,7 @@ step1_scenarios <- function(mf, snap, var) {
   # Read attributes before any lapply/Filter - they drop list attributes.
   clab <- attr(sc, "contrast_label")
   pnote <- attr(sc, "profile_note")
+  shape <- attr(sc, "shape")
   # Baseline linear predictor of the reference profile (fixed effects
   # included) for logit fits - used for per-term pp translations.
   profile_eta <- if (is_logistic_fit(mf) && !is.null(sc[[1]]$xb_lo)) sc[[1]]$xb_lo else NULL
@@ -789,10 +849,13 @@ step1_scenarios <- function(mf, snap, var) {
   if (!length(sc)) {
     return(NULL)
   }
+  if (!is.null(shape) && is_logistic_fit(mf)) {
+    shape$entry <- .s1_to_pp(shape$entry)
+  }
   list(
     engine = engine, scale = scale,
     contrast_label = clab, profile_note = pnote,
-    profile_eta = profile_eta, scenarios = sc
+    profile_eta = profile_eta, scenarios = sc, shape = shape
   )
 }
 
@@ -816,6 +879,88 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
   .s1_fmt_scaled(est, se, scale, digits = digits, ci = ci)
 }
 
+
+# Quadratic turning point of a fixest weather term, when it lies inside the
+# observed range of the variable. NULL for other shapes (interacted, cubic,
+# binned, RIF) where a single turning point is not defined.
+.s1_turning_point <- function(mf, snap, var) {
+  tryCatch(
+    {
+      if (!identical(.s1_engine(mf), "fixest") ||
+        !is.null(.s1_modx_var(mf, var))) {
+        return(NULL)
+      }
+      b <- stats::coef(extract_native_fit(mf$fit3, mf$engine))
+      nm2 <- grep(paste0("^I\\((?:I\\()?", .s1_esc(var), "\\^2\\)\\)?$"), names(b),
+        value = TRUE, perl = TRUE
+      )
+      if (!length(nm2) || !var %in% names(b) ||
+        any(grepl(paste0("^I\\((?:I\\()?", .s1_esc(var), "\\^3"), names(b), perl = TRUE))) {
+        return(NULL)
+      }
+      b1 <- b[[var]]
+      b2 <- b[[nm2[1]]]
+      if (!is.finite(b1) || !is.finite(b2) || b2 == 0) {
+        return(NULL)
+      }
+      x_star <- -b1 / (2 * b2)
+      x <- suppressWarnings(as.numeric(mf$train_data[[var]]))
+      x <- x[is.finite(x)]
+      if (!length(x) || x_star < min(x) || x_star > max(x)) {
+        return(NULL)
+      }
+      list(x = x_star, shape = if (b2 < 0) "peak" else "trough")
+    },
+    error = function(e) NULL
+  )
+}
+
+# Effects by bin for a binned weather term (fixest, linear or log outcomes):
+# the bin with the largest absolute effect, whether effects change steadily
+# across bins, and the first bin (above the reference bin) whose 95% interval
+# excludes zero. NULL for logit (log-odds, no single pp translation) and RIF.
+.s1_bin_pattern <- function(mf, snap, var, scale) {
+  tryCatch(
+    {
+      if (!identical(.s1_engine(mf), "fixest") || is_logistic_fit(mf)) {
+        return(NULL)
+      }
+      ct <- .fixest_coeftable(extract_native_fit(mf$fit3, mf$engine))
+      terms <- grep(paste0("^", .s1_esc(var), "[\\[\\(]"), rownames(ct), value = TRUE)
+      if (length(terms) < 2L) {
+        return(NULL)
+      }
+      lower <- .s1_bin_lower(terms, var)
+      terms <- terms[order(lower)]
+      lower <- sort(lower)
+      est <- ct[terms, 1]
+      se <- ct[terms, 2]
+      bin_label <- function(i) {
+        .cut_bin_label(sub(paste0("^", .s1_esc(var)), "", terms[[i]]))
+      }
+      imax <- which.max(abs(est))
+      f <- .s1_fmt_scaled(est[[imax]], se[[imax]], scale)
+      sig <- is.finite(se) & se > 0 & abs(est) > 1.96 * se
+      first <- if (any(sig)) which(sig)[[1L]] else NA_integer_
+      d <- diff(est)
+      list(
+        label = bin_label(imax),
+        value = f$value, lo_txt = f$lo_txt, hi_txt = f$hi_txt,
+        monotone = length(terms) >= 3L && (all(d > 0) || all(d < 0)),
+        any_sig = any(sig),
+        first_label = if (is.na(first)) NA_character_ else bin_label(first),
+        first_lower = if (is.na(first)) NA_real_ else lower[[first]],
+        first_estimate = if (is.na(first)) NA_real_ else est[[first]]
+      )
+    },
+    error = function(e) NULL
+  )
+}
+
+# Weather-effect direction of the outcome ("higher_is_better" etc.).
+.s1_direction <- function(snap) {
+  tryCatch(metric_metadata("mean", snap$outcome)$direction, error = function(e) NULL)
+}
 
 # Cards ----
 
@@ -884,7 +1029,21 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
       "and policies, not causal weather impacts."
     )
   )
-  list(
+  tp <- .s1_turning_point(mf, snap, var)
+  if (!is.null(tp)) {
+    info_bits <- c(info_bits, paste0(
+      "The quadratic specification has a ", tp$shape, " at about ",
+      format(signif(tp$x, 3), trim = TRUE), ", inside the observed range of the variable."
+    ))
+  }
+  bp <- if (binned) .s1_bin_pattern(mf, snap, var, scale) else NULL
+  if (!is.null(bp)) {
+    info_bits <- c(info_bits, paste0(
+      "Largest effect by bin: ", bp$label, " (", bp$value, " vs the reference bin).",
+      if (bp$monotone) " Effects change steadily across bins." else ""
+    ))
+  }
+  out <- list(
     label = lab, value = fmt$value,
     note = paste(ci_line, contrast_line, sep = " \u00b7 "),
     note_html = shiny::tagList(
@@ -893,6 +1052,9 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
     ),
     info = paste(info_bits, collapse = " ")
   )
+  # The interval is shown on the card; no significance verdict is printed.
+  out$significant <- !isTRUE(fmt$spans_zero)
+  out
 }
 
 .s1_who_card <- function(mf, snap, var, engine, scale, label_fun,
@@ -921,13 +1083,14 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
       f1 <- .s1_fmt_scaled(s1$estimate, s1$se, scale)
       f9 <- .s1_fmt_scaled(s9$estimate, s9$se, scale)
       bits_val <- c(bits_val, paste0(f1$value, " vs ", f9$value))
-      cmp_line <- "poorest 10% vs richest 10%"
+      cmp_line <- "10th vs 90th percentile of welfare"
       rif_cmp_line <- cmp_line
       note_parts <- c(note_parts, cmp_line)
       info_bits <- c(info_bits, paste0(
-        "Compares the translated effect between the poorest 10% and the ",
-        "richest 10% of households (RIF quantile estimates; values are ",
-        "log-point approximations of % changes)."
+        "Compares the translated effect at the 10th and 90th percentiles of the ",
+        "welfare distribution (RIF quantile estimates; values are log-point ",
+        "approximations of % changes). A quantile effect describes the ",
+        "distribution, not the households currently at those ranks."
       ))
       p <- if (isTRUE(rif_p_cached)) {
         rif_p
@@ -1134,18 +1297,34 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
     ))
   }
   b1 <- .s1_coef_at(mf, var, 1L)
+  b2 <- .s1_coef_at(mf, var, 2L)
   b3 <- .s1_coef_at(mf, var, 3L)
-  if (is.null(b1) || is.null(b3) || !is.finite(b1$estimate) ||
-    !is.finite(b3$estimate) || !is.finite(b1$se) || !is.finite(b3$se)) {
+  ok <- function(b) {
+    !is.null(b) && is.finite(b$estimate) && is.finite(b$se)
+  }
+  if (!ok(b3) || (!ok(b2) && !ok(b1))) {
     return(list(
       label = lab, value = "\u2014",
       note = "stability across specifications could not be assessed",
       class = "neutral"
     ))
   }
-  sign_agree <- sign(b1$estimate) == sign(b3$estimate) && sign(b1$estimate) != 0
-  ci_overlap <- abs(b1$estimate - b3$estimate) <=
-    1.96 * sqrt(b1$se^2 + b3$se^2)
+  # Two coefficients agree when they share a sign and their 95% intervals
+  # are consistent with each other.
+  agree <- function(a, b) {
+    sign(a$estimate) == sign(b$estimate) && sign(a$estimate) != 0 &&
+      abs(a$estimate - b$estimate) <= 1.96 * sqrt(a$se^2 + b$se^2)
+  }
+  same_sign <- function(a, b) {
+    sign(a$estimate) == sign(b$estimate) && sign(a$estimate) != 0
+  }
+  # The verdict compares the fixed-effects specification with the full one:
+  # weather effects are identified from within-unit variation, so surviving
+  # fixed effects is what matters. Specification 1 mixes in cross-sectional
+  # variation and only enters the count.
+  ref <- if (ok(b2)) b2 else b1
+  n_agree <- 1L + (ok(b1) && agree(b1, b3)) + (ok(b2) && agree(b2, b3))
+  n_specs <- 1L + ok(b1) + ok(b2)
   # The spec-comparison table is hidden for RIF, so the verdict points at the
   # full coefficient table instead and names the quantile it describes.
   rif_provenance <- if (identical(engine, "rif")) {
@@ -1156,26 +1335,33 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
   stab_info <- paste0(
     "Compares the weather coefficient across the three nested specifications ",
     "shown in the table below: (1) weather only, (2) + fixed effects, ",
-    "(3) + controls. Stable: same sign and overlapping 95% confidence ",
-    "intervals; Sensitive: sign holds but the magnitude moves; Unstable: ",
+    "(3) + controls. The verdict compares specifications 2 and 3, because ",
+    "weather effects are identified from within-unit variation; specification 1 ",
+    "also picks up cross-sectional differences. Robust: same sign and consistent ",
+    "95% intervals; Sensitive: sign holds but the magnitude moves; Not robust: ",
     "sign changes \u2014 interpret with caution."
   )
-  if (sign_agree && ci_overlap) {
+  count_line <- paste0(n_agree, " of ", n_specs, " specifications agree")
+  if (agree(ref, b3)) {
     list(
-      label = lab, value = "Stable",
-      note = "same sign and overlapping 95% CIs across specifications",
+      label = lab, value = "Robust",
+      note = count_line,
+      note_html = shiny::tagList(
+        shiny::tags$div(count_line),
+        shiny::tags$div(style = "font-weight: 600;", "survives fixed effects")
+      ),
       info = paste0(stab_info, rif_provenance)
     )
-  } else if (sign_agree) {
+  } else if (same_sign(ref, b3)) {
     list(
       label = lab, value = "Sensitive",
-      note = "sign consistent, but the magnitude changes across specifications",
+      note = paste0(count_line, "; magnitude changes"),
       info = paste0(stab_info, rif_provenance),
       class = "neutral"
     )
   } else {
     list(
-      label = lab, value = "Unstable",
+      label = lab, value = "Not robust",
       note = "sign changes across specifications \u2014 interpret with caution",
       info = paste0(stab_info, rif_provenance),
       class = "neutral"
@@ -1190,8 +1376,6 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
     extract_native_fit(mf$fit3, mf$engine)
   }
   N <- tryCatch(as.integer(stats::nobs(fit3n)), error = function(e) NA_integer_)
-  # Same R² the full coefficient table reports (within R², FE contribution
-  # excluded) - a different metric here used to contradict the table.
   fmt_r2 <- function(w) {
     if (!is.finite(w)) {
       "\u2014"
@@ -1201,42 +1385,158 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
       sprintf("%.2f", w)
     }
   }
-  stat <- tryCatch(
+  n_txt <- if (is.finite(N)) {
+    paste(formatC(N, format = "d", big.mark = ","), "observations")
+  } else {
+    NULL
+  }
+  # Overall R-squared (fixed effects included): Steps 2-3 predict welfare
+  # levels from the fixed effects, controls and weather together, so this is
+  # the fit those simulations rest on. Within R-squared stays in the popover
+  # and the Model fit tab.
+  r2_stat <- tryCatch(
     {
       if (engine == "ml") {
-        "tree-based model"
-      } else if (engine == "rif") {
-        w <- fixest::r2(fit3n, "wr2")
-        if (!is.finite(w)) w <- fixest::r2(fit3n, "r2")
-        paste0("Within R\u00b2 (\u03c4 = 0.5) ", fmt_r2(w))
+        list(value = "\u2014", stat = "tree-based model")
       } else if (is_logistic_fit(mf)) {
-        sprintf("McFadden R\u00b2 %s", fmt_r2(fixest::r2(fit3n, "pr2")))
+        list(value = fmt_r2(fixest::r2(fit3n, "pr2")), stat = "McFadden R\u00b2")
       } else {
-        w <- fixest::r2(fit3n, "wr2")
-        if (!is.finite(w)) w <- fixest::r2(fit3n, "r2")
-        paste0("Within R\u00b2 ", fmt_r2(w))
+        list(
+          value = fmt_r2(fixest::r2(fit3n, "r2")),
+          stat = if (engine == "rif") "R\u00b2 (\u03c4 = 0.5)" else "R\u00b2"
+        )
       }
     },
-    error = function(e) ""
+    error = function(e) list(value = "\u2014", stat = "")
   )
+  value <- r2_stat$value
+  note <- paste(c(
+    if (nzchar(r2_stat$stat) && !identical(value, "\u2014")) r2_stat$stat else NULL,
+    n_txt
+  ), collapse = " \u00b7 ")
+  if (identical(engine, "ml")) {
+    # No R-squared for tree-based fits: lead with the sample size instead.
+    value <- if (is.finite(N)) formatC(N, format = "d", big.mark = ",") else "\u2014"
+    note <- paste(c(if (is.finite(N)) "observations" else NULL, r2_stat$stat), collapse = " \u00b7 ")
+  }
   list(
-    label = "Sample & fit",
-    value = if (is.finite(N)) formatC(N, format = "d", big.mark = ",") else "\u2014",
-    note = paste(
-      c(
-        if (is.finite(N)) "observations" else NULL,
-        if (nzchar(stat)) stat else NULL
-      ),
-      collapse = " \u00b7 "
-    ),
+    label = "Model fit",
+    value = value,
+    note = note,
     info = paste0(
-      "Observations used in estimation and the reported fit statistic: ",
-      "Within R\u00b2 (fixed-effect contribution excluded) for linear and ",
-      "RIF models, McFadden R\u00b2 for binary outcomes \u2014 the same ",
-      "statistics the Model fit tab reports. Values refer to the full ",
-      "specification (fixed effects and controls)."
+      "Overall R\u00b2 of the full specification (fixed effects and controls) for linear ",
+      "and RIF models, McFadden R\u00b2 for binary outcomes. Steps 2\u20133 predict ",
+      "welfare levels from the fixed effects, controls and weather together, so the ",
+      "overall fit is the relevant one; weather effects themselves are identified from ",
+      "within-unit variation, where a low within R\u00b2 is normal. The Model fit tab ",
+      "reports within R\u00b2 and the other statistics. In-sample statistics: they do ",
+      "not measure out-of-sample accuracy.",
+      if (engine == "rif") {
+        paste(
+          " For RIF models the R\u00b2 is for the recentered influence function at the",
+          "median quantile and is not comparable to a level R\u00b2."
+        )
+      } else {
+        ""
+      }
     ),
     class = "neutral"
+  )
+}
+
+# Shape of the response: only for non-linear specifications (quadratic /
+# cubic terms or binned weather) on fixest fits. A single +1 SD contrast can
+# hide a non-linear response (for example a peak near the sample mean), so
+# this card reports where the effect builds. NULL when not applicable.
+.s1_shape_card <- function(mf, snap, var, engine, scale, label_fun,
+                           scenario = NULL, scenario_cached = FALSE) {
+  if (!identical(engine, "fixest")) {
+    return(NULL)
+  }
+  unit <- NULL
+  w <- snap$weather
+  if (!is.null(w) && !is.null(w$name) && !is.null(w$units) &&
+    var %in% as.character(w$name)) {
+    unit <- trimws(as.character(w$units[w$name == var][1]))
+  }
+  unit_txt <- if (!is.null(unit) && !is.na(unit) && nzchar(unit)) paste0(" ", unit) else ""
+  direction <- .s1_direction(snap)
+  lab <- "Shape of response"
+  binned <- identical(.s1_cont_binned(snap, var), "Binned")
+
+  if (binned) {
+    bp <- .s1_bin_pattern(mf, snap, var, scale)
+    if (is.null(bp)) {
+      return(NULL)
+    }
+    ci_line <- paste0("(largest: ", bp$label, unit_txt, " ", bp$value,
+      "; 95% CI: ", bp$lo_txt, " to ", bp$hi_txt, ")")
+    ref_line <- "vs reference bin"
+    if (isTRUE(bp$any_sig)) {
+      st <- headline_status(bp$first_estimate, direction)
+      word <- switch(st$kind %||% "neutral",
+        adverse = "Harm", favourable = "Gain", "Effect"
+      )
+      value <- paste0(word, " from ", format(signif(bp$first_lower, 3), trim = TRUE), unit_txt)
+    } else {
+      value <- "No clear effect by bin"
+    }
+    return(list(
+      label = lab, value = value,
+      note = paste(ci_line, ref_line, sep = " \u00b7 "),
+      note_html = shiny::tagList(
+        shiny::tags$div(ci_line),
+        shiny::tags$div(style = "font-weight: 600;", ref_line)
+      ),
+      info = paste(
+        "Effects by temperature bin relative to the reference (omitted) bin. The headline",
+        "is the first bin above the reference whose 95% interval excludes zero, where the",
+        "response starts. The context line gives the bin with the largest effect and its",
+        "95% interval.",
+        if (isTRUE(bp$monotone)) "Effects change steadily across bins." else "",
+        "Effects are associations in this survey population."
+      )
+    ))
+  }
+
+  # Polynomial terms: median -> 95th percentile contrast.
+  shp <- if (isTRUE(scenario_cached)) {
+    scenario$shape
+  } else {
+    attr(.s1_fixest_scenarios(mf, snap, var), "shape")
+  }
+  if (is.null(shp)) {
+    return(NULL)
+  }
+  e <- shp$entry
+  # Cached scenarios (step1_scenarios) are already on the probability scale.
+  if (!isTRUE(scenario_cached) && is_logistic_fit(mf) && !is.null(e)) {
+    e <- .s1_to_pp(e)
+  }
+  if (is.null(e) || !is.finite(e$estimate) || !is.finite(e$se) || e$se <= 0) {
+    return(NULL)
+  }
+  fmt <- .s1_fmt_scaled(e$estimate, e$se, scale, ci = e$ci)
+  fx <- function(x) paste0(format(signif(x, 3), trim = TRUE), unit_txt)
+  ci_line <- paste0("(95% CI: ", fmt$lo_txt, " to ", fmt$hi_txt, ")")
+  range_line <- paste0("median to 95th percentile (", fx(shp$x_lo), " \u2192 ", fx(shp$x_hi), ")")
+  tp <- .s1_turning_point(mf, snap, var)
+  tp_line <- if (!is.null(tp)) paste0(tp$shape, " at ", fx(tp$x)) else NULL
+  list(
+    label = lab, value = fmt$value,
+    note = paste(c(ci_line, range_line, tp_line), collapse = " \u00b7 "),
+    note_html = shiny::tagList(
+      shiny::tags$div(ci_line),
+      shiny::tags$div(style = "font-weight: 600;", range_line),
+      if (!is.null(tp_line)) shiny::tags$div(tp_line)
+    ),
+    info = paste(
+      "Effect of moving from the median to the 95th percentile of the weather variable,",
+      "evaluated along the fitted polynomial. A single +1 SD contrast can hide a",
+      "non-linear response, for example a peak near the sample mean; this contrast shows",
+      "the upper tail. Where the quadratic has a turning point inside the observed range it",
+      "is given in the last line. Effects are associations in this survey population."
+    )
   )
 }
 
@@ -1271,8 +1571,11 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
                             rif_scenarios_cached = FALSE,
                             rif_p = NULL, rif_p_cached = FALSE) {
   scale <- .s1_scale(mf, snap)
-  list(
+  Filter(Negate(is.null), list(
     .s1_effect_card(mf, snap, var, engine, scale, label_fun,
+      scenario = scenario, scenario_cached = scenario_cached
+    ),
+    .s1_shape_card(mf, snap, var, engine, scale, label_fun,
       scenario = scenario, scenario_cached = scenario_cached
     ),
     .s1_who_card(
@@ -1284,7 +1587,7 @@ step1_fmt_effect <- function(est, se, scale, digits = 1, ci = NULL) {
     ),
     .s1_stability_card(mf, snap, var, engine),
     .s1_fit_card(mf, snap, engine)
-  )
+  ))
 }
 
 

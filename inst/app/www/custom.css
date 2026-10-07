@@ -559,7 +559,7 @@ body .btn {
 
 .headline-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 8px;
   margin: 0 0 10px;
 }
@@ -613,10 +613,53 @@ body .btn {
 
 .headline-card-label {
   color: #526575;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.04em;
+  line-height: 1.3;
+  /* Reserve two lines so headline values align across a row of cards. */
+  min-height: 2.6em;
   text-transform: uppercase;
+}
+
+.headline-card-label .wise-info-icon {
+  flex: 0 0 auto;
+}
+
+/* Direction-aware status: top border colour plus a worded flag (colour is
+   never the only signal). */
+.headline-card.status-favourable { border-top-color: #2e7d5b; }
+.headline-card.status-adverse { border-top-color: #b5472f; }
+.headline-card.status-uncertain { border-top-color: #9aa9b5; }
+
+.headline-card-flag {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #eef2f5;
+  color: #526575;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.headline-card-flag.flag-favourable { background: #e3f1ea; color: #1f5e42; }
+.headline-card-flag.flag-adverse { background: #f8e6e1; color: #8c3320; }
+
+/* One-line basis strip: provenance (counts, N) that is not a result. */
+.headline-basis {
+  color: #5f6f7d;
+  font-size: 0.72rem;
+  line-height: 1.3;
+  margin: -2px 0 10px;
+}
+.headline-basis-item + .headline-basis-item::before {
+  content: "\00b7";
+  margin: 0 6px;
 }
 
 .headline-card-value {

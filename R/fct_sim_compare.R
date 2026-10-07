@@ -8,9 +8,7 @@
 #   label_agg_method(key)     -- human-readable label for aggregation method
 #   label_deviation(key)      -- human-readable label for deviation choice
 #   .resolve_year_styles()    -- internal; dynamic linetype map by sorted year
-#   plot_pointrange_climate() -- hero chart with three nested uncertainty bands
 #   build_threshold_table_df()  -- return-period threshold data frame for DT
-#   enhance_exceedance()        -- per-model exceedance curves + inter-model ribbon
 #
 # NOTE: plot_bar_climate() had no active call sites and was removed
 #   (formerly archived under dev/archived_fct/plot_bar_climate_archived.R).
@@ -62,7 +60,7 @@ label_deviation <- function(key) {
 #' Resolve Uncertainty Band Key to Quantile Pair
 #'
 #' Converts the UI uncertainty band selector key to a named numeric vector
-#' used by plot_pointrange_climate() and summarise_vals().
+#' used by the pointrange renderer and summarise_vals().
 #'
 #' Single authoritative definition (DUP-01): the former duplicate in
 #' fct_aggregation.R - whose "minmax" winsorised to 0.001/0.999 instead of the
@@ -106,37 +104,7 @@ resolve_band_q <- function(band_key) {
 
 # Grouped point-range chart ----
 
-#' Grouped Point-Range Chart Comparing Scenarios
-#'
-#' The primary Results tab chart. For each scenario shows:
-#'   - A dot at the mean of annual simulated values
-#'   - A thick coloured bar for the calculated weather variation
-#'   - A thin line for coefficient uncertainty (user-selected band)
-#'   - A dashed grey horizontal reference line at the Historical mean
-#'
-#' Groups are ordered Historical | spacer | SSP2 years | spacer | SSP3 years |
-#' spacer | SSP5 years. Colour follows SSP family; shade follows year rank.
-#'
-#' @param bands_tbl  Data frame of per-scenario/per-year aggregates with a
-#'   central value and band columns (from the Step 2 band assembly).
-#' @param x_label   Scalar character y-axis label (outcome units).
-#' @param group_order Character. \code{"scenario_x_year"} (default) or
-#'   \code{"year_x_scenario"} x-axis ordering.
-#' @param show_coef Logical. Show the thin coefficient-uncertainty line.
-#'   Default TRUE.
-#' @param show_annual Logical. Show the inter-annual interval. The decision-
-#'   first results view leaves this off because annual variation is shown in a
-#'   separate distribution plot.
-#' @return A ggplot object.
-#' @importFrom ggplot2 ggplot aes geom_linerange geom_point geom_hline
-#'   scale_colour_manual scale_x_discrete labs theme_minimal theme
-#'   element_blank element_text margin
-#' @importFrom colorspace lighten
-#' @importFrom dplyr bind_rows
-#' @importFrom stats quantile
-#' @importFrom rlang .data
-#' @export
-# Shared preparation behind plot_pointrange_climate() and its echarts
+# Shared preparation behind the pointrange renderer and its echarts
 # counterpart echart_pointrange_climate(): scenario keys, the SSP x period
 # colour palette, and the category order with spacer gutters. Pure data prep
 # - no rendering - so both surfaces stay in lockstep (guidelines sec. 7).
@@ -358,6 +326,7 @@ paired_effect_summary <- function(effect_tbl,
     baseline = center_fn(model_rows$baseline, na.rm = TRUE),
     policy = center_fn(model_rows$policy, na.rm = TRUE),
     center_method = if (identical(center, "median")) "median_model_mean" else center,
+    coef_sd = coef_sd,
     coef_lo = center_value + z[[1L]] * coef_sd,
     coef_hi = center_value + z[[2L]] * coef_sd,
     interann_lo = interann[[1L]], interann_hi = interann[[2L]],
@@ -440,46 +409,33 @@ step2_adverse_dot_data <- function(threshold_tbl, method = "mean", so = NULL) {
   central
 }
 
-#' Render Step 2 Return-Period Dot Plot (Figure S2-4)
+
+#' Compare the simulated historical baseline with the observed survey
 #'
-#' Design D: return-period names sit on the y axis outside the panel, the
-#' scenario legend is replaced by direct labels anchored at the right end of
-#' each top-row series, and Historical uses the exceedance plot's dark
-#' support colour. Scenario-coloured bands keep encoding climate-model spread.
+#' Aggregates the observed survey outcome with the same metric function,
+#' weights and poverty line as the simulation, and returns the gap to the
+#' simulated historical average. The simulated value averages many weather
+#' years, so this is a level-calibration check, not an exact reproduction.
+#' Returns NULL when the comparison is not available (no observed outcome,
+#' binary "poor" outcome, or LCU outcomes without the PPP factor).
+#' @param svy Baseline survey frame with the observed outcome column.
+#' @param so Selected outcome metadata (name, units, transform).
+#' @param method Aggregation method key.
+#' @param pov_line Poverty line in outcome units.
+#' @param use_weights Logical: apply survey weights, as the simulated series does.
+#' @param simulated Simulated historical value (mean across weather years).
+#' @param metadata Metric metadata (format, direction).
+#' @param rel_tol,pp_tol Flag when the gap exceeds this share of the observed
+#'   value (levels) or this absolute amount (rates, on the fraction scale).
+#' @return NULL or list(observed, simulated, gap, flag, tolerance_text).
 #' @noRd
-plot_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
-                                   title = NULL, subtitle = NULL) {
-  if (is.null(tbl) || !nrow(tbl)) {
-    return(blank_plot("Return-period outcomes are unavailable."))
-  }
-  scenario_levels <- c(
-    "Historical",
-    sort(unique(as.character(tbl$scenario[!tbl$is_historical])))
-  )
-  scenario_colours <- stats::setNames(vapply(scenario_levels, function(s) {
-    if (identical(s, "Historical")) {
-      return(.wise_support)
-    }
-    ssp <- .normalise_ssp(s)
-    if (ssp %in% names(.ssp_colours)) unname(.ssp_colours[[ssp]]) else .wise_slate
-  }, character(1L)), scenario_levels)
-  tbl$scenario_key <- factor(
-    ifelse(tbl$is_historical, "Historical", as.character(tbl$scenario)),
-    levels = scenario_levels
-  )
-  # Vertical dodge: multiple scenarios share each return-period row, so
-  # offset the markers per scenario to keep them readable. Historical
-  # keeps the lower slot; each future scenario takes its own slot above it.
-  # Wide multi-SSP runs need generous slot spacing to avoid crowding.
-  dodge_width <- 0.6
-  tbl$rp_y <- as.integer(tbl$rp_label)
-  tbl$dodge_offset <- stats::ave(
-    seq_len(nrow(tbl)),
-    tbl$rp_y,
-    FUN = function(idx) {
-      k <- length(idx)
-      if (k <= 1L) {
-        return(0)
+step2_baseline_check <- function(svy, so, method, pov_line, use_weights,
+                                 simulated, metadata = NULL,
+                                 rel_tol = 0.10, pp_tol = 0.02) {
+  tryCatch(
+    {
+      if (!is.data.frame(svy) || !is.finite(simulated)) {
+        return(NULL)
       }
       name <- as.character(so$name[1L])
       if (!nzchar(name) || !name %in% names(svy) || identical(name, "poor")) {
@@ -528,6 +484,64 @@ plot_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
 
 # Step 2 headline cards ----
 
+#' Coefficient (estimation) standard deviation of the climate shift
+#'
+#' The standard deviation of (equal-model mean of the scenario) minus
+#' (historical mean) caused by uncertainty in the estimated weather
+#' coefficients. Uses the per-year aggregate gradients (`F_agg_all`) carried by
+#' the aggregation tables: the same coefficient draws move the scenario and
+#' historical aggregates together, so the contrast is the norm of the
+#' difference of the mean gradients (the construction behind the deviation
+#' modes' contrast SDs). Returns NULL when gradients are unavailable, for
+#' example when coefficient uncertainty was skipped.
+#' @param hist_tbl,scen_tbl Aggregation tables with an `F_agg_all` list-column
+#'   (one model x coefficient-factor matrix per year).
+#' @return NULL or `list(sd = <numeric>)`.
+#' @noRd
+step2_delta_ci <- function(hist_tbl, scen_tbl) {
+  mean_gradient <- function(tbl) {
+    if (is.null(tbl) || !is.data.frame(tbl) || !"F_agg_all" %in% names(tbl)) {
+      return(NULL)
+    }
+    rows <- lapply(tbl$F_agg_all, function(m) {
+      if (is.matrix(m) && nrow(m) > 0L) colMeans(m, na.rm = TRUE) else NULL
+    })
+    rows <- Filter(Negate(is.null), rows)
+    if (!length(rows) || length(unique(lengths(rows))) != 1L) {
+      return(NULL)
+    }
+    Reduce(`+`, rows) / length(rows)
+  }
+  g_hist <- mean_gradient(hist_tbl)
+  g_scen <- mean_gradient(scen_tbl)
+  if (is.null(g_hist) || is.null(g_scen) || length(g_hist) != length(g_scen)) {
+    return(NULL)
+  }
+  d <- g_scen - g_hist
+  sd <- sqrt(sum(d * d, na.rm = TRUE))
+  if (!is.finite(sd) || sd <= 0) NULL else list(sd = sd)
+}
+
+#' Return period of the historical adverse level under another scenario
+#'
+#' Share of simulated model-years at or beyond `threshold` on the adverse side
+#' gives the exceedance probability; its inverse is the new return period.
+#' Returns `Inf` when no simulated year reaches the threshold and `NA` when
+#' there is nothing to evaluate.
+#' @param values Numeric vector of annual aggregates (all models pooled).
+#' @param threshold Numeric scalar, the historical adverse level.
+#' @param adverse_tail `"high"` or `"low"`.
+#' @noRd
+step2_adverse_return_period <- function(values, threshold, adverse_tail = "high") {
+  values <- values[is.finite(values)]
+  if (!length(values) || !is.finite(threshold)) {
+    return(NA_real_)
+  }
+  hit <- if (identical(adverse_tail, "high")) values >= threshold else values <= threshold
+  p <- mean(hit)
+  if (p <= 0) Inf else 1 / p
+}
+
 #' Build Step 2 Results Headline Cards
 #'
 #' Pure function returning a list of 5 card specifications for
@@ -556,7 +570,10 @@ step2_headline_cards <- function(bands,
                                  method = "mean",
                                  timeseries_curves = NULL,
                                  deviation = "none",
-                                 metadata = NULL) {
+                                 metadata = NULL,
+                                 baseline_check = NULL,
+                                 delta_ci = NULL,
+                                 weather_support = NULL) {
   if (is.null(bands) || !nrow(bands) ||
     !all(c("is_historical", "scenario") %in% names(bands))) {
     return(NULL)
@@ -581,11 +598,17 @@ step2_headline_cards <- function(bands,
     median = "Difference from historical median",
     ""
   )
+  display_digits <- if (identical(method, "total")) {
+    0L
+  } else if (identical(metadata$format, "percent")) {
+    1L
+  } else {
+    2L
+  }
   display_value <- function(x, change = is_change) {
     if (length(x) != 1L || !is.finite(suppressWarnings(as.numeric(x)))) {
       return("Unavailable")
     }
-    display_digits <- if (identical(method, "total")) 0L else 2L
     if (isTRUE(change)) {
       return(format_metric_value(as.numeric(x), metadata, change = TRUE,
         digits = display_digits))
@@ -597,53 +620,161 @@ step2_headline_cards <- function(bands,
     suffix <- paste0(" ", unit)
     if (endsWith(value, suffix)) substr(value, 1L, nchar(value) - nchar(suffix)) else value
   }
+  direction <- metadata$direction %||% "higher_is_better"
+  arrow <- " \u2192 "
 
-  # 1. Typical weather year outcome
-  val_1 <- if (has_future) {
-    paste0(display_value(hist$value), " vs ", display_value(focus$value))
-  } else {
-    display_value(hist$value)
+  has_curves <- !is.null(timeseries_curves) && nrow(timeseries_curves) &&
+    all(c("scenario", "value") %in% names(timeseries_curves))
+  curve_values <- function(scenario) {
+    if (!has_curves) return(numeric(0L))
+    v <- timeseries_curves$value[timeseries_curves$scenario == scenario]
+    v[is.finite(v)]
   }
 
-  line1_1 <- if (is_change) {
-    paste(deviation_label, "\u00b7 Historical vs SSP")
+  scen_lab <- if (has_future) as.character(focus$scenario) else NULL
+  # Weighted population (people) for translating a rate change into the
+  # number of poor; only for headcount metrics with survey weights.
+  w_pop <- if (!is.null(hist_sim$svy) && "weight" %in% names(hist_sim$svy) &&
+    identical(metadata$weighted, TRUE)) {
+    w <- suppressWarnings(as.numeric(hist_sim$svy$weight))
+    sum(w[is.finite(w)])
+  } else {
+    NA_real_
+  }
+  poor_line <- function(change) {
+    if (!identical(method, "headcount_ratio") || is_change) return(NULL)
+    poor_change_text(change, w_pop)
+  }
+
+  # 1. Expected change (focus scenario vs historical, average year)
+  change_1 <- if (has_future) focus$value - hist$value else NA_real_
+  val_1 <- if (has_future) display_value(change_1, change = TRUE) else display_value(hist$value)
+  line1_1 <- if (has_future && is_change) {
+    deviation_label
   } else if (has_future) {
-    "Historical vs SSP"
+    paste0(display_value(hist$value), arrow, display_value(focus$value))
   } else {
     "Historical baseline"
   }
-  # The expected outcome is the mean across simulated weather years. This is
-  # separate from the selected household-level aggregation within each year.
-  weather_year_label <- "Average year"
+  line2_1 <- if (has_future) {
+    paste0("Historical", arrow, scen_lab, " \u00b7 average year")
+  } else {
+    "Average year"
+  }
+  poor_1 <- if (has_future) poor_line(change_1) else NULL
+  # 95% interval from estimation (coefficient) uncertainty only.
+  ci_1 <- NULL
+  if (has_future && !is.null(delta_ci) && is.finite(change_1)) {
+    half <- stats::qnorm(0.975) * delta_ci$sd
+    drop_unit <- function(txt) {
+      unit <- metadata$change_unit %||% ""
+      if (nzchar(unit) && endsWith(txt, paste0(" ", unit))) {
+        substr(txt, 1L, nchar(txt) - nchar(unit) - 1L)
+      } else {
+        txt
+      }
+    }
+    ci_1 <- list(
+      lo = change_1 - half, hi = change_1 + half,
+      text = paste0(
+        "(95% CI: ", drop_unit(display_value(change_1 - half, change = TRUE)), " to ",
+        display_value(change_1 + half, change = TRUE), ")"
+      )
+    )
+  }
 
   card1 <- list(
-    label = "Expected outcome",
+    label = if (has_future) "Expected change" else "Expected outcome",
     value = val_1,
-    note = paste(line1_1, weather_year_label, sep = " \u00b7 "),
+    note = paste(c(line1_1, ci_1$text, line2_1, poor_1), collapse = " \u00b7 "),
     note_html = shiny::tagList(
       shiny::tags$div(line1_1),
-      shiny::tags$div(style = "font-weight: 600;", weather_year_label)
+      if (!is.null(ci_1)) shiny::tags$div(ci_1$text),
+      shiny::tags$div(style = "font-weight: 600;", line2_1),
+      if (!is.null(poor_1)) shiny::tags$div(poor_1)
     ),
     info = paste(
-      "Expected annual aggregate outcome under the historical baseline compared with the",
-      "focus climate scenario (mean across weather years and climate models).",
+      "Expected annual aggregate outcome under the focus climate scenario compared with the",
+      "historical baseline (mean across weather years and climate models).",
       "Differences reflect simulated climate conditions for the fixed survey population.",
+      "Short-run weather responses estimated in Step 1 are applied to future weather;",
+      "adaptation is not included.",
+      if (!is.null(ci_1)) paste(
+        "The 95% interval reflects uncertainty in the estimated weather coefficients only;",
+        "climate-model disagreement and year-to-year weather variability are shown on the",
+        "Signal vs noise and Year-to-year range cards."
+      ),
+      "Weather values outside the historical range need",
+      "extrapolation: the Diagnostics tab flags them under weather support.",
+      if (has_future) paste0("Historical: ", display_value(hist$value),
+        ". Scenario: ", display_value(focus$value), "."),
       metric_context_note(metadata)
-    )
+    ),
+    basis_text = "Short-run weather response; adaptation not included"
   )
-  card1$value_native <- as.numeric(c(hist$value, if (has_future) focus$value else NA_real_))
-  card1$change_native <- if (has_future) focus$value - hist$value else NA_real_
-  card1$change_display <- if (has_future) {
-    display_value(focus$value - hist$value, change = TRUE)
-  } else {
-    ""
+  # Level calibration of the simulated historical baseline against the survey.
+  if (!is.null(baseline_check)) {
+    check_txt <- paste0(
+      "Baseline check: simulated ", display_value(baseline_check$simulated, change = FALSE),
+      " vs survey ", display_value(baseline_check$observed, change = FALSE),
+      " (", display_value(baseline_check$gap, change = TRUE), ")"
+    )
+    card1$info <- paste(
+      card1$info, paste0(check_txt, "."),
+      "The simulated value averages many weather years; the survey is one observed",
+      "period, so small gaps are expected. A gap above ", baseline_check$tolerance_text,
+      " is flagged because every level reported in Steps 2\u20133 inherits it."
+    )
+    if (isTRUE(baseline_check$flag)) {
+      card1$basis_text <- paste(
+        card1$basis_text, paste0(check_txt, " \u2014 exceeds ", baseline_check$tolerance_text),
+        sep = " \u00b7 "
+      )
+    }
+    card1$baseline_check <- baseline_check
   }
+  # Weather support: how much of the simulated weather lies outside the
+  # historical reference interval (extrapolation). Always in the popover; a
+  # warning in the basis strip when any variable exceeds the 5% rule.
+  if (is.data.frame(weather_support) && nrow(weather_support) &&
+    all(c("weather_variable", "outside_share", "warning") %in% names(weather_support))) {
+    ws_name <- if ("weather_label" %in% names(weather_support)) {
+      ifelse(is.na(weather_support$weather_label), weather_support$weather_variable,
+        weather_support$weather_label)
+    } else {
+      weather_support$weather_variable
+    }
+    ws_pct <- paste0(formatC(100 * weather_support$outside_share, format = "f", digits = 1), "%")
+    ws_txt <- paste0(ws_name, " ", ws_pct, collapse = "; ")
+    card1$info <- paste(
+      card1$info,
+      paste0("Weather support (share of simulated weather outside the historical reference range): ",
+        ws_txt, "."),
+      "Values outside that range are extrapolated by the fitted model; more than 5% is flagged.",
+      "Details are on the Diagnostics tab."
+    )
+    if (any(weather_support$warning, na.rm = TRUE)) {
+      bad <- weather_support$warning & !is.na(weather_support$warning)
+      card1$basis_text <- paste(
+        card1$basis_text,
+        paste0("Weather outside historical range: ",
+          paste0(ws_name[bad], " ", ws_pct[bad], collapse = ", "), " (see Diagnostics)"),
+        sep = " \u00b7 "
+      )
+    }
+    card1$weather_support <- weather_support
+  }
+  card1$value_native <- as.numeric(c(hist$value, if (has_future) focus$value else NA_real_))
+  card1$change_native <- change_1
+  card1$change_ci_native <- if (!is.null(ci_1)) c(ci_1$lo, ci_1$hi) else c(NA_real_, NA_real_)
+  card1$change_display <- if (has_future) display_value(change_1, change = TRUE) else ""
+  if (has_future) card1$status <- headline_status(change_1, direction, display = card1$change_display)
   if (nzchar(card1$change_display)) {
     card1$note <- paste(card1$note, paste("Difference:", card1$change_display), sep = " \u00b7 ")
-    card1$note_html <- shiny::tagList(card1$note_html, shiny::tags$div(paste("Difference:", card1$change_display)))
   }
 
-  # 2. Adverse weather year outcomes (1-in-20 year)
+  # 2. Adverse weather years (1-in-20 year), plus how often the historical
+  # 1-in-20 level is reached under the focus scenario.
   v20_hist <- NA_real_
   v20_ssp <- NA_real_
   if (!is.null(threshold_tbl) && nrow(threshold_tbl) &&
@@ -660,10 +791,32 @@ step2_headline_cards <- function(bands,
     if (nrow(r20_ssp) && is.finite(r20_ssp$value[[1L]])) v20_ssp <- r20_ssp$value[[1L]]
   }
 
-  if (has_future && is.finite(v20_hist) && is.finite(v20_ssp)) {
-    val_2 <- paste0(display_value(v20_hist, change = FALSE), " vs ", display_value(v20_ssp, change = FALSE))
-    line1_2 <- if (is_change) paste(deviation_label, "\u00b7 Historical vs SSP") else "Historical vs SSP"
-    line2_2 <- "1-in-20 year"
+  both_20 <- has_future && is.finite(v20_hist) && is.finite(v20_ssp)
+  change_2 <- if (both_20) v20_ssp - v20_hist else NA_real_
+  focus_vals <- if (both_20) curve_values(focus$scenario) else numeric(0L)
+  rp_focus <- if (both_20 && length(focus_vals) >= 20L) {
+    step2_adverse_return_period(focus_vals, v20_hist, metadata$adverse_tail %||% "high")
+  } else {
+    NA_real_
+  }
+  rp_text <- if (is.na(rp_focus)) {
+    NULL
+  } else if (is.infinite(rp_focus)) {
+    paste0("rarer than 1-in-", format(length(focus_vals), big.mark = ","))
+  } else {
+    paste0("about 1-in-", format(max(1, round(rp_focus)), big.mark = ","))
+  }
+  poor_2 <- if (both_20) poor_line(change_2) else NULL
+  if (both_20) {
+    val_2 <- display_value(change_2, change = TRUE)
+    line1_2 <- if (is_change) deviation_label else {
+      paste0(display_value(v20_hist, change = FALSE), arrow, display_value(v20_ssp, change = FALSE))
+    }
+    line2_2 <- if (is.null(rp_text)) {
+      paste0("1-in-20 year \u00b7 ", scen_lab)
+    } else {
+      paste0("Historical 1-in-20 year", arrow, rp_text, " in ", scen_lab)
+    }
   } else if (!has_future && is.finite(v20_hist)) {
     val_2 <- display_value(v20_hist, change = FALSE)
     line1_2 <- if (is_change) paste(deviation_label, "\u00b7 Historical baseline") else "Historical baseline"
@@ -681,10 +834,11 @@ step2_headline_cards <- function(bands,
   card2 <- list(
     label = "Adverse weather years",
     value = val_2,
-    note = paste(line1_2, line2_2, sep = " \u00b7 "),
+    note = paste(c(line1_2, line2_2, poor_2), collapse = " \u00b7 "),
     note_html = shiny::tagList(
       shiny::tags$div(line1_2),
-      shiny::tags$div(style = "font-weight: 600;", line2_2)
+      shiny::tags$div(style = "font-weight: 600;", line2_2),
+      if (!is.null(poor_2)) shiny::tags$div(poor_2)
     ),
     info = paste(
       "Simulated aggregate outcome in adverse 1-in-20 weather years under the historical",
@@ -692,26 +846,123 @@ step2_headline_cards <- function(bands,
       "approximately 5% of simulated weather years. The adverse tail is determined",
       "automatically by the selected metric. Thresholds use the median across climate models,",
       "not the equal-model-mean expected headline.",
+      if (!is.null(rp_text)) paste0(
+        "Return-period shift: the share of simulated model-years under the focus scenario",
+        " at or beyond the historical 1-in-20 level gives the new frequency (",
+        rp_text, ")."
+      ),
+      if (both_20) paste0("Historical: ", display_value(v20_hist, change = FALSE),
+        ". Scenario: ", display_value(v20_ssp, change = FALSE), "."),
       metric_context_note(metadata)
     )
   )
   card2$value_native <- as.numeric(c(v20_hist, v20_ssp))
-  card2$change_native <- if (has_future && is.finite(v20_hist) && is.finite(v20_ssp)) {
-    v20_ssp - v20_hist
+  card2$change_native <- change_2
+  card2$change_display <- if (both_20) display_value(change_2, change = TRUE) else ""
+  card2$return_period_native <- rp_focus
+  if (both_20) card2$status <- headline_status(change_2, direction, display = card2$change_display)
+  if (nzchar(card2$change_display)) {
+    card2$note <- paste(card2$note, paste("Difference:", card2$change_display), sep = " \u00b7 ")
+  }
+
+  # 3. Signal vs noise: do the climate models agree on the direction of the
+  # change, and how large is the shift relative to year-to-year variability?
+  n_mods <- suppressWarnings(as.integer(focus$n_models %||% 1L))[1L]
+  if (!is.finite(n_mods) || n_mods < 1L) n_mods <- 1L
+
+  focus_model_means <- if (has_curves) {
+    x <- timeseries_curves[timeseries_curves$scenario == focus$scenario, , drop = FALSE]
+    if (nrow(x) && "model_id" %in% names(x)) {
+      tapply(x$value, x$model_id, mean, na.rm = TRUE)
+    } else {
+      numeric(0L)
+    }
+  } else {
+    numeric(0L)
+  }
+  focus_model_means <- as.numeric(focus_model_means[is.finite(focus_model_means)])
+  hist_curve <- curve_values("Historical")
+  hist_mean <- if (length(hist_curve)) mean(hist_curve) else hist$value
+  hist_sd <- if (length(hist_curve) >= 3L) stats::sd(hist_curve) else NA_real_
+  model_change <- focus_model_means - hist_mean
+  n_agree <- if (is.finite(change_1) && length(model_change) > 1L && change_1 != 0) {
+    sum(sign(model_change) == sign(change_1))
+  } else {
+    NA_integer_
+  }
+  agree_share <- if (is.finite(n_agree)) n_agree / length(model_change) else NA_real_
+  snr <- if (has_future && is.finite(hist_sd) && hist_sd > 0 && is.finite(change_1)) {
+    abs(change_1) / hist_sd
   } else {
     NA_real_
   }
-  card2$change_display <- if (has_future && is.finite(v20_hist) && is.finite(v20_ssp)) {
-    display_value(v20_ssp - v20_hist, change = TRUE)
+
+  val_3 <- if (!has_future) {
+    "Not applicable"
+  } else if (is.finite(n_agree)) {
+    paste0(n_agree, " of ", length(model_change), " models")
+  } else if (n_mods <= 1L) {
+    "Single climate model"
   } else {
-    ""
+    "Unavailable"
   }
-  if (nzchar(card2$change_display)) {
-    card2$note <- paste(card2$note, paste("Difference:", card2$change_display), sep = " \u00b7 ")
-    card2$note_html <- shiny::tagList(card2$note_html, shiny::tags$div(paste("Difference:", card2$change_display)))
+  line1_3 <- if (is.finite(n_agree)) "agree on direction of change" else if (has_future) "no model comparison" else "Historical baseline"
+  line2_3 <- if (is.finite(snr)) {
+    paste0("Shift is ", format(round(snr, 1), nsmall = 1), "\u00d7 the usual year-to-year swing")
+  } else {
+    NULL
+  }
+  line3_3 <- if (has_future) scen_lab else NULL
+
+  card3 <- list(
+    label = "Signal vs noise",
+    value = val_3,
+    note = paste(c(line1_3, line2_3, line3_3), collapse = " \u00b7 "),
+    note_html = shiny::tagList(
+      shiny::tags$div(line1_3),
+      if (!is.null(line2_3)) shiny::tags$div(line2_3),
+      if (!is.null(line3_3)) shiny::tags$div(style = "font-weight: 600;", line3_3)
+    ),
+    info = paste(
+      "Share of CMIP6 climate models whose average change for the focus scenario has the",
+      "same sign as the ensemble change; 80% or more is flagged as robust. The second line",
+      "compares the size of the climate shift with the standard deviation of historical",
+      "year-to-year outcomes, that is the usual swing between one weather year and the next",
+      "(a shift well below 1\u00d7 is hard to distinguish from ordinary weather variability).",
+      if (length(focus_model_means) > 1L) paste0(
+        "Range of model averages: ", display_value(min(focus_model_means)), " to ",
+        display_value(max(focus_model_means)), "."
+      ),
+      if (all(c("coef_lo", "coef_hi") %in% names(focus)) &&
+        is.finite(focus$coef_lo) && is.finite(focus$coef_hi)) paste0(
+        "Estimation (coefficient) uncertainty on the expected outcome: ",
+        display_value(focus$coef_lo), " to ", display_value(focus$coef_hi), "."
+      ),
+      "Model spread is evaluated at the central coefficient estimates."
+    )
+  )
+  card3$value_range_native <- if (has_future && length(focus_model_means) > 1L) {
+    c(min(focus_model_means), max(focus_model_means))
+  } else {
+    c(NA_real_, NA_real_)
+  }
+  card3$snr_native <- snr
+  if (is.finite(agree_share)) {
+    card3$status <- if (agree_share >= 0.8) {
+      dir <- headline_status(change_1, direction)
+      list(
+        kind = dir$kind %||% "neutral",
+        text = if (is.null(dir)) "Robust direction" else if (dir$kind == "favourable") {
+          "Robust: improves"
+        } else if (dir$kind == "adverse") "Robust: worsens" else "Robust direction"
+      )
+    } else {
+      list(kind = "uncertain", text = "Models disagree")
+    }
   }
 
-  # 3. Range across years (inter-annual weather variability). For future
+  # 4. Year-to-year range of the annual aggregate (internal weather variability).
+  # Range across years (inter-annual weather variability). For future
   # scenarios, first calculate each model's observed year range, then average
   # the lower and upper endpoints across models. This is different from taking
   # quantiles of the pooled model-year values, which can overweight extremes.
@@ -755,7 +1006,7 @@ step2_headline_cards <- function(bands,
     hist_range <- c(lo = hist$interann_lo, hi = hist$interann_hi)
   }
 
-  val_3 <- if (has_future && all(is.finite(focus_range))) {
+  val_r <- if (has_future && all(is.finite(focus_range))) {
     paste(display_value(focus_range[["lo"]]), "to", display_value(focus_range[["hi"]]))
   } else if (all(is.finite(hist_range))) {
     paste(display_value(hist_range[["lo"]]), "to", display_value(hist_range[["hi"]]))
@@ -763,20 +1014,20 @@ step2_headline_cards <- function(bands,
     "Unavailable"
   }
 
-  line1_3 <- if (has_future && all(is.finite(hist_range))) {
+  line1_r <- if (has_future && all(is.finite(hist_range))) {
     paste0("Hist: ", display_value(hist_range[["lo"]]), " to ", display_value(hist_range[["hi"]]))
   } else {
     "Historical baseline"
   }
-  line2_3 <- "Inter-annual weather variability"
+  line2_r <- if (has_future) scen_lab else "Inter-annual weather variability"
 
-  card3 <- list(
-    label = "Range across years",
-    value = val_3,
-    note = paste(line1_3, line2_3, sep = " \u00b7 "),
+  card_range <- list(
+    label = "Year-to-year range",
+    value = val_r,
+    note = paste(line1_r, line2_r, sep = " \u00b7 "),
     note_html = shiny::tagList(
-      shiny::tags$div(line1_3),
-      shiny::tags$div(style = "font-weight: 600;", line2_3)
+      shiny::tags$div(line1_r),
+      shiny::tags$div(style = "font-weight: 600;", line2_r)
     ),
     info = paste(
       "Range of annual population aggregate outcomes across simulated weather-year",
@@ -785,7 +1036,7 @@ step2_headline_cards <- function(bands,
       "time forecasting."
     )
   )
-  card3$value_range_native <- if (has_future && all(is.finite(focus_range))) {
+  card_range$value_range_native <- if (has_future && all(is.finite(focus_range))) {
     as.numeric(focus_range)
   } else if (all(is.finite(hist_range))) {
     as.numeric(hist_range)
@@ -793,61 +1044,7 @@ step2_headline_cards <- function(bands,
     c(NA_real_, NA_real_)
   }
 
-  # 4. Climate-model spread (full range of model means at expected outcome)
-  n_mods <- suppressWarnings(as.integer(focus$n_models %||% 1L))[1L]
-  if (!is.finite(n_mods) || n_mods < 1L) n_mods <- 1L
-
-  focus_model_means <- if (!is.null(timeseries_curves) && nrow(timeseries_curves) &&
-    all(c("scenario", "value") %in% names(timeseries_curves))) {
-    x <- timeseries_curves[timeseries_curves$scenario == focus$scenario, , drop = FALSE]
-    if (nrow(x) && "model_id" %in% names(x)) {
-      tapply(x$value, x$model_id, mean, na.rm = TRUE)
-    } else {
-      numeric(0L)
-    }
-  } else {
-    numeric(0L)
-  }
-  focus_model_means <- as.numeric(focus_model_means[is.finite(focus_model_means)])
-
-  val_4 <- if (has_future && length(focus_model_means) > 1L) {
-    paste(display_value(min(focus_model_means)), "to", display_value(max(focus_model_means)))
-  } else if (has_future) {
-    display_value(focus$value)
-  } else {
-    "Not applicable"
-  }
-
-  line1_4 <- if (has_future && length(focus_model_means) > 1L) {
-    paste0("Full range across ", length(focus_model_means), " models")
-  } else if (has_future) {
-    "Single climate model"
-  } else {
-    "Single historical climate series"
-  }
-  line2_4 <- "CMIP6 model disagreement"
-
-  card4 <- list(
-    label = "Climate-model spread",
-    value = val_4,
-    note = paste(line1_4, line2_4, sep = " \u00b7 "),
-    note_html = shiny::tagList(
-      shiny::tags$div(line1_4),
-      shiny::tags$div(style = "font-weight: 600;", line2_4)
-    ),
-    info = paste(
-      "Range of expected annual aggregate outcomes across CMIP6 climate models for",
-      "the focus scenario. Reflects climate projection disagreement, evaluated at the",
-      "central expected outcome."
-    )
-  )
-  card4$value_range_native <- if (has_future && length(focus_model_means) > 1L) {
-    c(min(focus_model_means), max(focus_model_means))
-  } else if (has_future) {
-    c(focus$value, NA_real_)
-  } else {
-    c(NA_real_, NA_real_)
-  }
+  card4 <- card_range
 
   # 5. Tally of simulation years (e.g. scenarios * models * years...)
   run_info <- if (!is.null(hist_sim)) hist_sim$sim_summary %||% list() else list()
@@ -891,9 +1088,45 @@ step2_headline_cards <- function(bands,
   } else NA_real_
   prediction_note <- format_prediction_count(prediction_count, metadata$analysis_unit)
 
-  line1_5 <- if (n_scenarios > 0L) {
+  # Counts come from the simulated table itself (scenarios selected for
+  # Results, models and years actually present per scenario), not from the
+  # saved-scenario list or the focus scenario's model count.
+  sim_struct <- NULL
+  if (has_curves && all(c("model_id", "sim_year") %in% names(timeseries_curves))) {
+    is_h <- if ("is_historical" %in% names(timeseries_curves)) {
+      as.logical(timeseries_curves$is_historical)
+    } else {
+      timeseries_curves$scenario == "Historical"
+    }
+    fut_tbl <- timeseries_curves[!is_h, , drop = FALSE]
+    if (nrow(fut_tbl)) {
+      per <- split(fut_tbl, fut_tbl$scenario)
+      sim_struct <- list(
+        k = length(per),
+        m = vapply(per, function(d) length(unique(d$model_id)), integer(1L)),
+        y = vapply(per, function(d) length(unique(d$sim_year)), integer(1L)),
+        hy = length(unique(timeseries_curves$sim_year[is_h]))
+      )
+    }
+  }
+  scen_word <- function(k) if (k == 1L) "scenario" else "scenarios"
+  line1_5 <- if (!is.null(sim_struct) && length(unique(sim_struct$m)) == 1L &&
+    length(unique(sim_struct$y)) == 1L &&
+    (sim_struct$hy == 0L || sim_struct$hy == sim_struct$y[[1L]])) {
     paste0(
-      "(", n_scenarios, if (n_scenarios == 1L) " SSP \u00d7 " else " SSPs \u00d7 ",
+      "(", sim_struct$k, " ", scen_word(sim_struct$k), " \u00d7 ", sim_struct$m[[1L]], " models",
+      if (sim_struct$hy > 0L) " + 1 historical" else "", ") \u00d7 ",
+      sim_struct$y[[1L]], " yrs"
+    )
+  } else if (!is.null(sim_struct)) {
+    rng <- function(x) if (min(x) == max(x)) as.character(min(x)) else paste0(min(x), "\u2013", max(x))
+    paste0(
+      sim_struct$k, " ", scen_word(sim_struct$k), ", ", rng(sim_struct$m),
+      " models and ", rng(sim_struct$y), " yrs each"
+    )
+  } else if (n_scenarios > 0L) {
+    paste0(
+      "(", n_scenarios, " ", scen_word(n_scenarios), " \u00d7 ",
       n_mods, " models + 1 historical) \u00d7 ", n_years, " yrs"
     )
   } else {
@@ -909,6 +1142,11 @@ step2_headline_cards <- function(bands,
       shiny::tags$div(style = "font-weight: 600;", prediction_note)
     ),
     class = "neutral",
+    # Provenance, not a result: drawn as a basis strip, not a card.
+    basis_only = TRUE,
+    basis_text = paste0(
+      val_5, " simulation years: ", line1_5, " \u00b7 ", prediction_note
+    ),
     info = paste(
       "Total number of simulated population aggregates across all configured",
       "climate scenarios, ensemble climate models, and annual weather draws",
@@ -1213,12 +1451,10 @@ model_robustness_data <- function(ts_tbl, band_q = c(lo = 0.10, hi = 0.90)) {
 }
 
 # ============================================================================
-# Interactive (echarts4r) counterparts of the ggplot builders above.
+# Interactive (echarts4r) renderers for simulation comparison summaries.
 # Guidelines sec. 7: same statistics computed in R with the same parameters,
 # echarts only draws precomputed values; theme tokens come from
 # utils_plot_theme.R (wise_eaxis_label / wise_echart_theme, etc.).
-# The ggplot builders above remain the static fallback and are still used by
-# Step 3 policy comparisons - nothing here replaces them.
 # ============================================================================
 
 # Empty widget shell. echarts4r 0.5.x rejects single-column and <2-row frames
@@ -1324,7 +1560,7 @@ model_robustness_data <- function(ts_tbl, band_q = c(lo = 0.10, hi = 0.90)) {
 }
 
 # Line series over numeric (x, y) pairs with optional point labels on the
-# last finite point (the endpoint scenario labels the ggplot builders drew
+# last finite point (the endpoint scenario labels the static builders drew
 # with geom_text).
 .e_line_series <- function(name, x, y, colour, width = 2, type = "solid",
                            opacity = 1, endpoint_label = FALSE,
@@ -1415,19 +1651,18 @@ model_robustness_data <- function(ts_tbl, band_q = c(lo = 0.10, hi = 0.90)) {
 
 #' Interactive pointrange (Step 2 Results point-range chart)
 #'
-#' echarts counterpart of [plot_pointrange_climate()] for the Step 2 Results
-#' surface. Reuses the exact same data preparation ([.pointrange_prep()]).
+#' echarts renderer for the Step 2 Results surface. Reuses the data
+#' preparation in [.pointrange_prep()].
 #' Nested bands are drawn as floating bar pairs (transparent base + coloured
 #' segment) and the central estimate as an open scatter marker, matching the
-#' ggplot linerange widths: ensemble 6pt -> barWidth 14, annual 3.5pt -> 8,
+#' Static linerange widths: ensemble 6pt -> barWidth 14, annual 3.5pt -> 8,
 #' coefficient 1.2pt -> 3.
 #'
-#' Source-dodged policy comparisons (Baseline vs Policy) stay on the ggplot
-#' builder; this builder draws the single-source Step 2 chart and simply
-#' co-locates co-located categories when a `source` column is present.
+#' This builder draws the single-source Step 2 chart and co-locates categories
+#' when a `source` column is present.
 #'
 #' @return An `echarts4r` widget (never NULL; empty states return
-#'   [echart_blank()] with the ggplot builder's message).
+#'   [echart_blank()] with the corresponding empty-state message).
 #' @noRd
 echart_pointrange_climate <- function(bands_tbl,
                                       x_label = "",
@@ -1517,9 +1752,9 @@ echart_pointrange_climate <- function(bands_tbl,
 
 #' Interactive uncertainty-source bars
 #'
-#' echarts counterpart of [plot_variance_contribution()]: one horizontal bar
+#' echarts version of the variance contribution chart: one horizontal bar
 #' per (scenario, source) on the same sqrt-of-variance statistics, Okabe-Ito
-#' source colours, legend bottom (the ggplot showed one).
+#' source colours, legend bottom (the static chart showed one).
 #' @noRd
 echart_variance_contribution <- function(var_tbl, height = "300px", percent = FALSE) {
   if (is.null(var_tbl) || nrow(var_tbl) == 0L) {
@@ -1534,7 +1769,7 @@ echart_variance_contribution <- function(var_tbl, height = "300px", percent = FA
     "Inter-model spread", "Inter-annual variability", "Coefficient uncertainty"
   )
   src_cols <- c(.wise_cat[[3]], .wise_cat[[2]], .wise_cat[[1]])
-  # Horizontal rows: scenarios top-down in first-appearance order (ggplot
+  # Horizontal rows: scenarios top-down in first-appearance order (static plot
   # coord_flip with levels rev(unique(df$scenario)) puts Historical on top).
   cats <- rev(unique(as.character(df$scenario)))
   cat_idx <- setNames(seq_along(cats) - 1L, cats)
@@ -1607,11 +1842,10 @@ echart_variance_contribution <- function(var_tbl, height = "300px", percent = FA
 
 #' Interactive adverse return-period dot plot
 #'
-#' echarts counterpart of [plot_step2_adverse_dot()]: per scenario, the
+#' echarts renderer for Step 2 adverse return periods: per scenario, the
 #' ensemble spread as a floating bar pair and the central estimate as an open
 #' marker, scenario labels anchored right of the top-row (Expected) markers
-#' exactly like the ggplot direct labels. No legend (the ggplot used direct
-#' labels only).
+#' exactly like the archived static direct labels. No legend.
 #'
 #' `pending` lists scenario labels still computing (progressive Step 2
 #' results). Their dodge slots are reserved, so landed points keep their
@@ -1636,7 +1870,7 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
   }, character(1L)), scenario_levels)
   tbl$scenario_key <- ifelse(tbl$is_historical, "Historical", as.character(tbl$scenario))
   tbl$rp_y <- as.integer(tbl$rp_label)
-  # Vertical dodge as in the ggplot builder: scenarios sharing a return-period
+  # Vertical dodge as in the static builder: scenarios sharing a return-period
   # row get distinct slots so their dumbbells stay readable.
   dodge_width <- 0.6
   tbl$dodge_offset <- stats::ave(
@@ -1779,8 +2013,8 @@ echart_step2_adverse_dot <- function(tbl, x_label = "Outcome level",
 
 #' Interactive annual outcome distribution
 #'
-#' Step 2 counterpart of [plot_annual_distribution()]. Delegates to the
-#' shared Step 3 ECharts builder so both steps use the same annual distribution
+#' Step 2 renderer. Delegates to the shared Step 3 ECharts builder so both
+#' steps use the same annual distribution
 #' geometry, labels, and interaction.
 #' @noRd
 echart_annual_distribution <- function(tbl, x_label = "Outcome (outcome units)",
@@ -2139,12 +2373,12 @@ echart_model_robustness <- function(tbl, x_label = "Expected annual outcome",
 
 #' Interactive exceedance probability curve
 #'
-#' echarts counterpart of [enhance_exceedance()]. Same per-(scenario, rank)
+#' echarts renderer for exceedance probability. Same per-(scenario, rank)
 #' statistics: across-model median curve, inter-model quantile band and
 #' coefficient band (both reduced to their two boundary curves - see the
 #' judgment note below), endpoint scenario labels.
 #'
-#' Orientation: the ggplot builder drew outcome on x and probability on y
+#' Orientation: the static builder drew outcome on x and probability on y
 #' under coord_flip(); the echarts widget keeps that reading (outcome on the
 #' value axis) with the probability axis horizontal.
 #'
@@ -2224,7 +2458,7 @@ echart_exceedance <- function(curves_tbl,
     ssp <- .normalise_ssp(s)
     if (ssp %in% names(.ssp_colours)) unname(.ssp_colours[[ssp]]) else .wise_slate
   }, character(1L)), scenario_levels)
-  # Period linetypes from the ggplot builder's year-style resolution.
+  # Period linetypes from the static builder's year-style resolution.
   agg_df$yr_lbl <- ifelse(agg_df$is_historical, "Historical",
     vapply(agg_df$scenario, .parse_year, character(1L))
   )
@@ -2305,7 +2539,7 @@ echart_exceedance <- function(curves_tbl,
   }
 
   # Probability axis: log10 with return-period ticks in the adverse tail
-  # (same support rule as the ggplot builder); percent-formatted labels.
+  # (same support rule as the static builder); percent-formatted labels.
   if (is_adverse_tail) {
     log_rp <- c("1:2" = 0.50, RP_LOW)
     log_rp <- supported_rp(log_rp)
@@ -2403,7 +2637,7 @@ echart_exceedance <- function(curves_tbl,
       jsonlite::toJSON(.wise_result_rate_unit(x_label), auto_unbox = TRUE)))
   )
   # Right-hand gutter so the endpoint scenario labels stay clear of the
-  # curves, mirroring the ggplot builder's 22% expansion.
+  # curves, mirroring the static builder's 22% expansion.
   e$x$opts$grid <- list(containLabel = TRUE, left = 65, right = 145, top = 28, bottom = 82)
   wise_echart_theme(e)
 }

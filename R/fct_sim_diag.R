@@ -88,11 +88,28 @@ weather_support_summary <- function(regression_weather, scenario_weather,
                                     weather_vars, lower = 0.01, upper = 0.99,
                                     weather_specs = NULL,
                                     warn_share = 0.05) {
-  if (is.null(regression_weather) || !is.data.frame(regression_weather)) {
-    return(data.frame())
-  }
+  refs <- weather_support_reference(
+    regression_weather, weather_vars, lower, upper, weather_specs
+  )
   scenarios <- scenario_weather %||% list()
-  rows <- lapply(intersect(weather_vars, names(regression_weather)), function(v) {
+  rows <- lapply(refs, function(r) {
+    dplyr::bind_rows(lapply(names(scenarios), function(nm) {
+      weather_support_scenario(r, scenarios[[nm]][[r$variable]], nm, warn_share)
+    }))
+  })
+  dplyr::bind_rows(Filter(Negate(is.null), rows))
+}
+
+# Reference support of each weather variable: the robust (default 1%-99%)
+# interval of the historical values, or the set of supported bins. Computed
+# once so many scenarios can be checked without re-ranking the reference.
+weather_support_reference <- function(regression_weather, weather_vars,
+                                      lower = 0.01, upper = 0.99,
+                                      weather_specs = NULL) {
+  if (is.null(regression_weather) || !is.data.frame(regression_weather)) {
+    return(list())
+  }
+  refs <- lapply(intersect(weather_vars, names(regression_weather)), function(v) {
     spec <- if (!is.null(weather_specs) && "name" %in% names(weather_specs)) {
       weather_specs[weather_specs$name == v, , drop = FALSE]
     } else {
@@ -107,63 +124,87 @@ weather_support_summary <- function(regression_weather, scenario_weather,
       if (!length(supported)) {
         return(NULL)
       }
-      reference_label <- paste(supported, collapse = ", ")
-      robust <- c(NA_real_, NA_real_)
+      list(
+        variable = v, is_binned = TRUE, n_reference = length(ref),
+        supported = supported, reference_label = paste(supported, collapse = ", "),
+        robust = c(NA_real_, NA_real_), lower = lower, upper = upper
+      )
     } else {
       ref <- suppressWarnings(as.numeric(regression_weather[[v]]))
       ref <- ref[is.finite(ref)]
       if (!length(ref)) {
         return(NULL)
       }
-      robust <- as.numeric(stats::quantile(ref, c(lower, upper),
-        names = FALSE,
-        na.rm = TRUE, type = 8
-      ))
-      supported <- NULL
-      reference_label <- NA_character_
-    }
-    out <- lapply(names(scenarios), function(nm) {
-      x_raw <- scenarios[[nm]][[v]]
-      x <- if (is_binned) {
-        x <- as.character(x_raw)
-        x[!is.na(x) & nzchar(x)]
-      } else {
-        x <- suppressWarnings(as.numeric(x_raw))
-        x[is.finite(x)]
-      }
-      if (!length(x)) {
-        return(NULL)
-      }
-      outside <- if (is_binned) {
-        !(x %in% supported)
-      } else {
-        x < robust[[1L]] | x > robust[[2L]]
-      }
-      data.frame(
-        weather_variable = v, scenario = nm,
-        n_reference = length(ref), n_scenario = length(x),
-        robust_lo = robust[[1L]], robust_hi = robust[[2L]],
-        reference_label = reference_label,
-        is_binned = is_binned,
-        outside_n = sum(outside), outside_share = mean(outside),
-        warning = mean(outside) > warn_share,
-        warning_rule = if (is_binned) {
-          paste0(
-            "Reference bins; warn above ",
-            warn_share * 100, "% outside"
-          )
-        } else {
-          paste0(
-            "Robust ", lower * 100, "%-", upper * 100,
-            "% reference interval; warn above ", warn_share * 100, "% outside"
-          )
-        },
-        stringsAsFactors = FALSE
+      list(
+        variable = v, is_binned = FALSE, n_reference = length(ref),
+        supported = NULL, reference_label = NA_character_,
+        robust = as.numeric(stats::quantile(ref, c(lower, upper),
+          names = FALSE, na.rm = TRUE, type = 8
+        )),
+        lower = lower, upper = upper
       )
-    })
-    dplyr::bind_rows(out)
+    }
   })
-  dplyr::bind_rows(Filter(Negate(is.null), rows))
+  Filter(Negate(is.null), refs)
+}
+
+# Share of one scenario's values for one variable outside its reference
+# support. NULL when the scenario has no usable values.
+weather_support_scenario <- function(ref, x_raw, scenario, warn_share = 0.05) {
+  x <- if (ref$is_binned) {
+    x <- as.character(x_raw)
+    x[!is.na(x) & nzchar(x)]
+  } else {
+    x <- suppressWarnings(as.numeric(x_raw))
+    x[is.finite(x)]
+  }
+  if (!length(x)) {
+    return(NULL)
+  }
+  outside <- if (ref$is_binned) {
+    !(x %in% ref$supported)
+  } else {
+    x < ref$robust[[1L]] | x > ref$robust[[2L]]
+  }
+  data.frame(
+    weather_variable = ref$variable, scenario = scenario,
+    n_reference = ref$n_reference, n_scenario = length(x),
+    robust_lo = ref$robust[[1L]], robust_hi = ref$robust[[2L]],
+    reference_label = ref$reference_label,
+    is_binned = ref$is_binned,
+    outside_n = sum(outside), outside_share = mean(outside),
+    warning = mean(outside) > warn_share,
+    warning_rule = if (ref$is_binned) {
+      paste0("Reference bins; warn above ", warn_share * 100, "% outside")
+    } else {
+      paste0(
+        "Robust ", ref$lower * 100, "%-", ref$upper * 100,
+        "% reference interval; warn above ", warn_share * 100, "% outside"
+      )
+    },
+    stringsAsFactors = FALSE
+  )
+}
+
+# Pool member-level support rows (one per climate-model member) into one row
+# per weather variable for a scenario: counts add, the share is recomputed.
+weather_support_pool <- function(rows, scenario, warn_share = 0.05) {
+  rows <- dplyr::bind_rows(Filter(Negate(is.null), rows))
+  if (!nrow(rows)) {
+    return(NULL)
+  }
+  pooled <- lapply(split(rows, rows$weather_variable), function(d) {
+    out <- d[1L, , drop = FALSE]
+    out$scenario <- scenario
+    out$n_scenario <- sum(d$n_scenario)
+    out$outside_n <- sum(d$outside_n)
+    out$outside_share <- out$outside_n / out$n_scenario
+    out$warning <- out$outside_share > warn_share
+    out$n_members <- nrow(d)
+    out$max_member_share <- max(d$outside_share)
+    out
+  })
+  dplyr::bind_rows(pooled)
 }
 
 # Year-anchored welfare ridge plot ----

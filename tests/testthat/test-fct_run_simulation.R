@@ -79,13 +79,14 @@ make_ledger_pipeline_fn <- function() {
 
 run_ledger_sim <- function(weather_result,
                            pipeline_fn = make_ledger_pipeline_fn(),
-                           weather_fn = function(...) weather_result, ...) {
+                           weather_fn = function(...) weather_result,
+                           svy = make_ledger_svy(), ...) {
   fct_run_simulation(
     sw                  = data.frame(name = "temp", stringsAsFactors = FALSE),
     so                  = data.frame(name = "welfare", type = "numeric",
                                      transform = "log", label = "Welfare",
                                      stringsAsFactors = FALSE),
-    svy                 = make_ledger_svy(),
+    svy                 = svy,
     ss                  = NULL,
     mf                  = list(fit3 = NULL, engine = "fixest",
                                 train_data = make_ledger_svy(),
@@ -516,4 +517,47 @@ test_that("profiling helpers are called without defensive exists() guards (CR-CQ
     "exists\\(\"(weighted_baseline_deciles|baseline_weight_column)\"", text)))
   expect_true(is.function(.wx_process_tree_rss_bytes))
   expect_true(is.function(.prediction_profile_record))
+})
+
+test_that("scenarios carry a weather-support summary computed against the historical reference", {
+  svy <- make_ledger_svy()
+  svy$int_month <- 6L
+  # 100 historical Junes at loc01 with temperatures 1..100.
+  hist_wh <- data.frame(
+    code = "TST", year = 2020L, survname = "SRV", loc_id = "loc01",
+    temp = as.numeric(1:100),
+    timestamp = as.POSIXct(sprintf("%d-06-01", 1920:2019), tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+  mk_future <- function(extreme) {
+    data.frame(
+      code = "TST", year = 2030L, survname = "SRV", loc_id = "loc01",
+      temp = c(rep(50, 100 - extreme), rep(1000, extreme)),
+      timestamp = as.POSIXct(sprintf("%d-06-01", 2000 + seq_len(100)), tz = "UTC"),
+      stringsAsFactors = FALSE
+    )
+  }
+  wr <- list(
+    historical = hist_wh,
+    "ssp2_4_5_2030_2040_ensemble_mean" = mk_future(10),
+    "ssp2_4_5_2030_2040_ensemble_hi" = mk_future(10),
+    "ssp5_8_5_2030_2040_ensemble_mean" = mk_future(0)
+  )
+  res <- suppressWarnings(run_ledger_sim(wr, svy = svy))
+  ssp2 <- res$new_scenarios[["SSP2-4.5 / 2030-2040"]]$weather_support
+  expect_s3_class(ssp2, "data.frame")
+  expect_identical(ssp2$weather_variable, "temp")
+  # Two members, each with 10 of 100 values far above the 99th percentile.
+  expect_identical(ssp2$n_members, 2L)
+  expect_equal(ssp2$n_scenario, 200)
+  expect_equal(ssp2$outside_share, 0.10)
+  expect_true(ssp2$warning)
+  ssp5 <- res$new_scenarios[["SSP5-8.5 / 2030-2040"]]$weather_support
+  expect_equal(ssp5$outside_share, 0)
+  expect_false(ssp5$warning)
+})
+
+test_that("a run without usable survey cells still succeeds with no weather-support summary", {
+  res <- suppressWarnings(run_ledger_sim(make_ledger_weather_result()))
+  expect_null(res$new_scenarios[["SSP2-4.5 / 2030-2040"]]$weather_support)
 })

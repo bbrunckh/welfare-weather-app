@@ -675,6 +675,57 @@ mod_2_02_results_server <- function(id,
       if (!is.null(saved_scenarios)) saved_scenarios() else list()
     }
 
+    # Observed-survey calibration of the simulated historical baseline
+    # (committed results only; the placeholder frame carries no survey).
+    baseline_check_rv <- reactive({
+      req(hist_agg_rv())
+      if (.is_provisional()) return(NULL)
+      hs <- hist_sim()
+      method <- .selected_method()
+      wk <- weight_key()
+      sim_vals <- hist_agg_rv()[[wk]][[method]]$value
+      step2_baseline_check(
+        hs$svy, hs$so, method, pov_line_val(),
+        use_weights = identical(wk, "weighted"),
+        simulated = mean(sim_vals, na.rm = TRUE),
+        metadata = metric_metadata(method, hs$so %||% NULL)
+      )
+    })
+
+    # Coefficient (estimation) uncertainty of the climate shift for the first
+    # future scenario shown on the cards: needs the aggregation gradients, so
+    # it is NULL when coefficient uncertainty was skipped.
+    delta_ci_rv <- reactive({
+      req(hist_agg_rv())
+      if (.is_provisional()) return(NULL)
+      bands <- headline_bands_rv()
+      fut <- bands[!bands$is_historical, , drop = FALSE]
+      if (!nrow(fut)) return(NULL)
+      wk <- weight_key()
+      method <- .selected_method()
+      entry <- scenario_agg_rv()[[fut$scenario[[1L]]]]
+      step2_delta_ci(hist_agg_rv()[[wk]][[method]], entry[[wk]][[method]])
+    })
+
+    # Weather-support summary of the first future scenario on the cards
+    # (computed during the run; absent for older runs or when unavailable).
+    weather_support_rv <- reactive({
+      req(hist_agg_rv())
+      if (.is_provisional()) return(NULL)
+      bands <- headline_bands_rv()
+      fut <- bands[!bands$is_historical, , drop = FALSE]
+      if (!nrow(fut)) return(NULL)
+      ws <- tryCatch(saved_scenarios()[[fut$scenario[[1L]]]]$weather_support,
+        error = function(e) NULL)
+      if (!is.data.frame(ws) || !nrow(ws)) return(NULL)
+      sw <- if (!is.null(selected_weather)) selected_weather() else NULL
+      if (!is.null(sw) && all(c("name", "label") %in% names(sw))) {
+        lab <- stats::setNames(as.character(sw$label), as.character(sw$name))
+        ws$weather_label <- unname(lab[ws$weather_variable])
+      }
+      ws
+    })
+
     headline_cards_data_rv <- reactive({
       req(headline_bands_rv())
       bands <- headline_bands_rv()
@@ -692,6 +743,9 @@ mod_2_02_results_server <- function(id,
         method = .selected_method(),
         timeseries_curves = tryCatch(timeseries_curves_rv(), error = function(e) NULL),
         deviation = input$cmp_deviation %||% "none",
+        baseline_check = tryCatch(baseline_check_rv(), error = function(e) NULL),
+        delta_ci = tryCatch(delta_ci_rv(), error = function(e) NULL),
+        weather_support = tryCatch(weather_support_rv(), error = function(e) NULL),
         metadata = {
           hs <- tryCatch(.display_hist_sim(), error = function(e) NULL)
           selected <- .selected_method()
@@ -1454,7 +1508,7 @@ mod_2_02_results_server <- function(id,
     })
 
     # `exceedance_ribbon` removed - the ribbon is now built inside
-    # enhance_exceedance() directly from each series' (value_all, value_all_sd)
+    # the static exceedance renderer directly from each series' (value_all, value_all_sd)
     # using analytic delta-method bands, so there is nothing to precompute here.
 
     # Three-source uncertainty decomposition ----
@@ -1994,7 +2048,7 @@ mod_2_02_results_server <- function(id,
       fun = .committed_only(function() step2_headline_df(headline_cards_data_rv())),
       description = paste(
         "Headline values are display-formatted; native numeric endpoints, units, selected deviation, metric context, and summary operators are included.",
-        "Expected and range summaries average years within model and weight climate models equally; adverse annual selected-metric quantiles use an equal-model mean."
+        "Expected, model-agreement and range summaries average years within model and weight climate models equally; adverse annual selected-metric quantiles use an equal-model mean."
       )
     )
 

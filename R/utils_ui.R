@@ -249,31 +249,163 @@ simulation_summary_card <- function(hist_sim, saved_scenarios = list(),
   )
 }
 
+#' Direction-aware status flag for a headline card
+#'
+#' Maps a signed change, the metric's direction (`lower_is_better` /
+#' `higher_is_better`, from the metric registry) and an optional significance
+#' verdict to a card flag. Colour kind comes from direction; the text is
+#' "Significant" / "Not significant" when a verdict is supplied, otherwise
+#' "Favourable" / "Adverse". Returns NULL when there is nothing to flag.
+#' @param change Numeric scalar, signed change in the metric's own units.
+#' @param direction Character scalar metric direction.
+#' @param significant Logical scalar or NA: is the change significant at 95%?
+#' @param display Optional rendered text of the change; when it shows only zeros
+#'   no flag is returned.
+#' @return NULL or `list(kind, text)` with kind in favourable / adverse /
+#'   uncertain / neutral.
+#' @noRd
+headline_status <- function(change = NA_real_, direction = NULL,
+                            significant = NA, display = NULL) {
+  change <- suppressWarnings(as.numeric(change))[1L]
+  # A change that renders as zero (for example "-0.00") carries no direction.
+  if (!is.null(display) && length(display) == 1L) {
+    num <- regmatches(display, regexpr("[0-9][0-9,]*\\.?[0-9]*", display))
+    if (length(num) && !grepl("[1-9]", num)) {
+      return(NULL)
+    }
+  }
+  sig <- if (length(significant) && !is.na(significant[1L])) {
+    isTRUE(significant[1L])
+  } else {
+    NA
+  }
+  if (!is.na(sig) && !sig) {
+    return(list(kind = "uncertain", text = "Not significant"))
+  }
+  sign_dir <- switch(as.character(direction %||% "")[1L],
+    higher_is_better = 1,
+    lower_is_better = -1,
+    0
+  )
+  kind <- if (!is.finite(change) || change == 0 || sign_dir == 0) {
+    "neutral"
+  } else if (change * sign_dir > 0) {
+    "favourable"
+  } else {
+    "adverse"
+  }
+  text <- if (isTRUE(sig)) {
+    "Significant"
+  } else {
+    switch(kind, favourable = "Favourable", adverse = "Adverse", NULL)
+  }
+  if (is.null(text)) {
+    return(NULL)
+  }
+  list(kind = kind, text = text)
+}
+
+#' Headline cards plus an optional one-line basis strip
+#'
+#' Cards flagged `basis_only` are not drawn as cards: their `basis_text` (and
+#' the `basis_text` of any other card) is collected into a compact strip
+#' beneath the row, with the card's `info` popover kept on the strip. A card
+#' may carry `status = list(kind, text)` (see `headline_status()`), drawn as a
+#' flag under the headline and used to colour the card's top border.
+#' @noRd
 headline_cards_ui <- function(cards) {
   if (is.null(cards) || !length(cards)) {
     return(NULL)
   }
-  shiny::tags$div(
-    class = "headline-cards",
-    lapply(cards, function(card) {
-      shiny::tags$div(
-        class = paste("headline-card", card$class %||% ""),
-        shiny::tags$div(
-          class = "headline-card-label",
-          card$label %||% "Result",
-          if (!is.null(card$info) && nzchar(card$info)) {
-            info_popover(shiny::p(card$info))
+  is_basis <- vapply(cards, function(c) isTRUE(c$basis_only), logical(1L))
+  shown <- cards[!is_basis]
+  basis_cards <- Filter(function(c) {
+    !is.null(c$basis_text) && nzchar(c$basis_text)
+  }, cards)
+  strip <- if (length(basis_cards)) {
+    shiny::tags$div(
+      class = "headline-basis",
+      lapply(basis_cards, function(c) {
+        shiny::tags$span(
+          class = "headline-basis-item", c$basis_text,
+          if (isTRUE(c$basis_only) && !is.null(c$info) && nzchar(c$info)) {
+            info_popover(shiny::p(c$info))
           }
-        ),
-        shiny::tags$div(class = "headline-card-value", card$value %||% "Unavailable"),
-        if (!is.null(card$note_html)) {
-          shiny::tags$div(class = "headline-card-note", card$note_html)
-        } else if (!is.null(card$note) && nzchar(card$note)) {
-          shiny::tags$div(class = "headline-card-note", card$note)
-        }
-      )
-    })
+        )
+      })
+    )
+  }
+  shiny::tagList(
+    shiny::tags$div(
+      class = "headline-cards",
+      lapply(shown, function(card) {
+        st <- card$status
+        shiny::tags$div(
+          class = paste(
+            "headline-card", card$class %||% "",
+            if (!is.null(st$kind)) paste0("status-", st$kind) else ""
+          ),
+          shiny::tags$div(
+            class = "headline-card-label",
+            shiny::tags$span(card$label %||% "Result"),
+            if (!is.null(card$info) && nzchar(card$info)) {
+              info_popover(shiny::p(card$info))
+            }
+          ),
+          shiny::tags$div(class = "headline-card-value", card$value %||% "Unavailable"),
+          if (!is.null(st$text) && nzchar(st$text)) {
+            shiny::tags$div(
+              class = paste("headline-card-flag", paste0("flag-", st$kind %||% "neutral")),
+              st$text
+            )
+          },
+          if (!is.null(card$note_html)) {
+            shiny::tags$div(class = "headline-card-note", card$note_html)
+          } else if (!is.null(card$note) && nzchar(card$note)) {
+            shiny::tags$div(class = "headline-card-note", card$note)
+          }
+        )
+      })
+    ),
+    strip
   )
+}
+
+#' "about 120K more poor" / "about 2.1K fewer poor" from a rate change
+#'
+#' @param change Change in a headcount ratio (fraction scale).
+#' @param pop Weighted population (people) the ratio refers to.
+#' @return NULL when either input is unusable or the change rounds to zero
+#'   people, otherwise a short phrase.
+#' @noRd
+poor_change_text <- function(change, pop) {
+  change <- suppressWarnings(as.numeric(change))[1L]
+  pop <- suppressWarnings(as.numeric(pop))[1L]
+  if (!is.finite(change) || !is.finite(pop) || pop <= 0) {
+    return(NULL)
+  }
+  people <- change * pop
+  if (round(abs(people)) < 1) {
+    return(NULL)
+  }
+  paste0(
+    "\u2248 ", fmt_compact_count(abs(people)),
+    if (people >= 0) " more poor" else " fewer poor"
+  )
+}
+
+#' Compact count: 1.3M / 450.0K / 920
+#' @noRd
+fmt_compact_count <- function(x) {
+  x <- suppressWarnings(as.numeric(x))[1L]
+  if (!is.finite(x)) return("Unavailable")
+  if (x >= 1e6) {
+    paste0(fmt_num(x / 1e6, 1), "M")
+  } else if (x >= 1e3) {
+    paste0(fmt_num(x / 1e3, 1), "K")
+  } else {
+    fmt_num(round(x), 0)
+  }
 }
 
 format_prediction_count <- function(count, analysis_unit = NULL) {
