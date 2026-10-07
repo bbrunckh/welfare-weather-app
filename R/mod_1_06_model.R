@@ -152,16 +152,15 @@ mod_1_06_model_server <- function(id,
     # Model type selector ----
 
     output$model_selector_ui <- renderUI({
+      # CR-A11Y-03: themed amber warning with an icon, not inline red alone.
       if (is.null(selected_outcome()) || !length(selected_outcome())) {
-        return(shiny::helpText(
-          "Select an outcome variable to choose model type.",
-          style = "color: red; font-size: 12px;"
+        return(no_data_warning(
+          "Select an outcome variable to choose model type."
         ))
       }
       if (is.null(survey_weather()) || !nrow(as.data.frame(survey_weather()))) {
-        return(shiny::helpText(
-          "Load survey and weather data to select model type.",
-          style = "color: red; font-size: 12px;"
+        return(no_data_warning(
+          "Load survey and weather data to select model type."
         ))
       }
 
@@ -194,7 +193,7 @@ mod_1_06_model_server <- function(id,
       if (length(avail) == 0) {
         return(shiny::helpText(
           "No policy-relevant variables are available in the current data.",
-          style = "color: grey; font-size: 12px;"
+          style = "font-size: 12px;"
         ))
       }
 
@@ -332,7 +331,7 @@ mod_1_06_model_server <- function(id,
             )
           } else {
             shiny::helpText("No interaction variables available.",
-              style = "color: grey; font-size: 12px;"
+              style = "font-size: 12px;"
             )
           }
         },
@@ -353,7 +352,7 @@ mod_1_06_model_server <- function(id,
           )
         } else {
           shiny::helpText("No fixed effect variables available.",
-            style = "color: grey; font-size: 12px;"
+            style = "font-size: 12px;"
           )
         },
         hr(),

@@ -67,6 +67,7 @@
         pill_toggle(
           inputId  = ns("cmp_agg_method"),
           label    = NULL,
+          aria_label = "Aggregation method",
           choices  = agg_choices,
           selected = "mean",
           layout   = "horizontal"
@@ -74,6 +75,7 @@
         pill_toggle(
           inputId = ns("cmp_deviation"),
           label = NULL,
+          aria_label = "Outcome or difference from historical",
           choices = c(
             "Outcome level"                 = "none",
             "Difference from historical mean"   = "mean",
@@ -145,6 +147,7 @@
         pill_toggle(
           ns("annual_distribution_type"),
           label    = NULL,
+          aria_label = "Distribution chart type",
           choices  = c("Violin" = "violin", "Boxplot" = "boxplot"),
           selected = "violin",
           layout   = "horizontal"

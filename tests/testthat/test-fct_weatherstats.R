@@ -429,3 +429,20 @@ test_that("binned weather summary aggregates all variables in shared groups", {
     tolerance = 1e-10
   )
 })
+
+test_that("A11Y-ALT: weather_plot_layout names every chart slot", {
+  ns <- shiny::NS("m")
+  for (ec in c(FALSE, TRUE)) {
+    one <- as.character(weather_plot_layout(ns, 1L, c("p1", "p2"),
+                                            echarts = ec))
+    expect_match(one, 'role="img"', fixed = TRUE)
+    expect_match(one, 'aria-label="Chart for the selected weather variable"',
+                 fixed = TRUE)
+    two <- as.character(weather_plot_layout(ns, 2L, c("p1", "p2"),
+                                            alts = c("Custom alt", NA),
+                                            echarts = ec))
+    expect_match(two, 'aria-label="Custom alt"', fixed = TRUE)
+    expect_match(two, 'aria-label="Chart for weather variable 2 of 2"',
+                 fixed = TRUE)
+  }
+})

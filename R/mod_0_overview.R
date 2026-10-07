@@ -46,7 +46,7 @@ mod_0_overview_ui <- function(id) {
         div(
           class = "step-card-title",
           tags$span(n, class = "step-badge"),
-          h5(title)
+          h2(class = "h5", title)
         ),
         p(text)
       )
@@ -312,7 +312,9 @@ mod_0_overview_server <- function(id) {
       # Auto-connect mode never offers the connection form, even after a
       # failure (CR-SEC-01); the status card asks for a reload instead.
       if (.auto_connect()) {
-        return(uiOutput(ns("connection_status_ui")))
+        # R2-A11Y-05: the status output is a polite live region.
+        return(uiOutput(ns("connection_status_ui"),
+                        role = "status", `aria-live` = "polite"))
       }
 
       bslib::layout_columns(
@@ -329,10 +331,12 @@ mod_0_overview_server <- function(id) {
                 "GCS" = "gcs",
                 "S3" = "s3"
               ),
-              selected = "local"
+              selected = "local",
+              aria_label = "Data source"
             )
           ),
-          uiOutput(ns("connection_status_ui")),
+          uiOutput(ns("connection_status_ui"),
+                   role = "status", `aria-live` = "polite"),
           div(
             class = "connection-action-row",
             actionButton(

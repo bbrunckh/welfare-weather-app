@@ -219,3 +219,37 @@
   if (window.Shiny && Shiny.addCustomMessageHandler) register();
   else document.addEventListener('shiny:connected', register, { once: true });
 })();
+
+// ---- Slider accessible names (CR-A11Y-04) ------------------------------------
+// ionRangeSlider's keyboard focus target is the .irs-line span, which has no
+// role or name. Expose it as a slider named by the input's visible label (or
+// Shiny's own label) and keep its value in sync. jQuery events because Shiny
+// and ionRangeSlider fire shiny:bound / change through jQuery.
+(function () {
+  if (!window.jQuery) return;
+  function sync(input) {
+    var wrap = input.parentElement;
+    var line = wrap && wrap.querySelector('.irs-line');
+    if (!line || !input.id) return;
+    line.setAttribute('role', 'slider');
+    var lbl = Array.prototype.find.call(
+      document.querySelectorAll('label[for="' + input.id + '"]'),
+      function (l) { return l.textContent.trim() !== ''; }
+    );
+    if (lbl) {
+      if (!lbl.id) lbl.id = input.id + '-a11y-label';
+      line.setAttribute('aria-labelledby', lbl.id);
+    }
+    if (input.dataset.min) line.setAttribute('aria-valuemin', input.dataset.min);
+    if (input.dataset.max) line.setAttribute('aria-valuemax', input.dataset.max);
+    var v = String(input.value);
+    if (v.indexOf(';') === -1) {
+      line.setAttribute('aria-valuenow', v);
+    } else {
+      line.setAttribute('aria-valuetext', v.replace(';', ' to '));
+    }
+  }
+  jQuery(document).on('shiny:bound change', 'input.js-range-slider', function () {
+    sync(this);
+  });
+})();

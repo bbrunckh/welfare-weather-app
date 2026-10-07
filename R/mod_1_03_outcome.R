@@ -451,7 +451,8 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
             pill_toggle(
               inputId  = ns("cov_view"),
               choices  = c("Mean value" = "mean", "Coverage" = "coverage"),
-              selected = cov_view_val()
+              selected = cov_view_val(),
+              aria_label = "Map value"
             )
           })
 
@@ -497,7 +498,8 @@ mod_1_03_outcome_server <- function(id, variable_list, survey_data,
             pill_toggle(
               inputId  = ns("summary_wave"),
               choices  = choices,
-              selected = selected
+              selected = selected,
+              aria_label = "Summary table survey wave"
             )
           })
 

@@ -72,6 +72,40 @@
   min-width: 1.35em;
 }
 
+/* ---- Skip link (R2-A11Y-05, WCAG 2.4.1) ----------------------------------
+   Off-screen until focused, then shown over the navbar's top-left corner. */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2000;
+  padding: 0.5rem 0.9rem;
+  background: #ffffff;
+  color: var(--bs-primary, #0071bc);
+  font-weight: 600;
+  transform: translateY(-120%);
+}
+
+.skip-link:focus {
+  transform: none;
+  outline: 2px solid var(--bs-primary, #0071bc);
+  outline-offset: -2px;
+}
+
+#main-content:focus {
+  outline: none;
+}
+
+/* ---- Focus ring (R2-A11Y-02, WCAG 1.4.11) --------------------------------
+   The theme (app_ui.R) makes the input/nav/accordion focus ring a solid 2px
+   brand blue. Buttons build theirs from a per-variant colour at 50% alpha,
+   so give them the same ring, separated from filled buttons by a 2px gap.
+   `body .btn` outranks Bootstrap's `.btn` regardless of stylesheet order. */
+body .btn {
+  --bs-btn-focus-box-shadow: 0 0 0 2px var(--bs-body-bg, #fff),
+    0 0 0 4px var(--bs-primary, #0071bc);
+}
+
 /* ---- Step pages ---------------------------------------------------------- */
 
 .step-question {
@@ -99,6 +133,15 @@
 .sidebar .accordion-button:not(.collapsed) {
   background-color: rgba(0, 113, 188, 0.07);
   color: var(--bs-primary);
+  box-shadow: none;
+}
+
+/* The rule above also drops Bootstrap's focus shadow on expanded headers, so
+   give every sidebar header an explicit keyboard focus ring (WCAG 2.4.7).
+   Inset offset keeps it inside the rounded, clipped accordion item. */
+.sidebar .accordion-button:focus-visible {
+  outline: 2px solid var(--bs-primary, #0071bc);
+  outline-offset: -2px;
   box-shadow: none;
 }
 
@@ -207,7 +250,7 @@
 }
 
 .selection-card-op {
-  color: #9fb0be;
+  color: #5f6f7d;
   font-weight: 700;
   margin: 0 0.12rem;
 }
@@ -256,7 +299,7 @@
 }
 
 .selection-card-chevron {
-  color: #9fb0be;
+  color: #5f6f7d;
   font-weight: 700;
   font-size: 0.8rem;
 }
@@ -465,7 +508,7 @@
   margin-bottom: 0.75rem;
 }
 
-.empty-state h5 {
+.empty-state .h5 {
   color: var(--bs-dark);
   margin-bottom: 0.35rem;
 }
@@ -488,7 +531,7 @@
   margin-bottom: 0.35rem;
 }
 
-.overview-empty-state h5 {
+.overview-empty-state .h5 {
   font-size: 1rem;
   margin-bottom: 0.2rem;
 }
@@ -547,7 +590,7 @@
 }
 
 .step1-headline-note {
-  color: #718292;
+  color: #5f6f7d;
   font-size: 0.78rem;
   line-height: 1.35;
   margin: 8px 0 4px;
@@ -585,7 +628,7 @@
 }
 
 .headline-card-note {
-  color: #718292;
+  color: #5f6f7d;
   font-size: 0.73rem;
   line-height: 1.25;
   margin-top: 3px;
@@ -822,8 +865,10 @@ body.bslib-page-navbar:has(> .container-fluid > .tab-content > .tab-pane.active 
   margin: 0 auto 0.5rem;
 }
 
+/* The gradient ends at a darker blue than the brand #0071bc so the
+   translucent white hero text stays >= 4.5:1 across the panel (WCAG 1.4.3). */
 .hero-panel {
-  background: linear-gradient(135deg, #002244 0%, #0a3a6b 60%, #0071bc 100%);
+  background: linear-gradient(135deg, #002244 0%, #0a3a6b 60%, #005a96 100%);
   color: #fff;
   border-radius: var(--bs-border-radius-lg);
   padding: 1.45rem 1.75rem;
@@ -873,7 +918,7 @@ body.bslib-page-navbar:has(> .container-fluid > .tab-content > .tab-pane.active 
   font-size: 0.78rem;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  opacity: 0.65;
+  opacity: 0.8;
 }
 
 @media (max-width: 700px) {
@@ -904,7 +949,7 @@ body.bslib-page-navbar:has(> .container-fluid > .tab-content > .tab-pane.active 
   margin-bottom: 0;
 }
 
-.step-card-title h5 {
+.step-card-title .h5 {
   margin-bottom: 0;
 }
 
@@ -1293,12 +1338,14 @@ table.reactable td.wise-dt-wrap {
   color: var(--bs-primary, #0d6efd);
 }
 
+/* Darker than the brand success/danger tokens (3.0:1 and 4.4:1 on white) so
+   the stage text reaches 4.5:1 (WCAG 1.4.3): 4.8:1 and 5.3:1. */
 .pipeline-done {
-  color: var(--bs-success, #198754);
+  color: #00843d;
 }
 
 .pipeline-failed {
-  color: var(--bs-danger, #dc3545);
+  color: #d4192b;
 }
 
 .pipeline-note {
@@ -1384,10 +1431,16 @@ button.wise-csv-btn .fa {
 }
 
 .wise-info-icon:hover,
-.wise-info-icon:focus {
+.wise-info-icon:focus-visible {
   opacity: 1;
   color: var(--bs-primary);
-  outline: none;
+}
+
+/* Keyboard focus must stay visible (WCAG 2.4.7). */
+.wise-info-icon:focus-visible {
+  outline: 2px solid var(--bs-primary, #0071bc);
+  outline-offset: 2px;
+  border-radius: 2px;
 }
 
 .popover {
@@ -1460,7 +1513,7 @@ button.wise-csv-btn .fa {
 }
 
 .diagnostic-note {
-  color: #718292;
+  color: #5f6f7d;
   font-size: 0.78rem;
   line-height: 1.4;
   margin: 0.55rem 0 0;
@@ -1667,7 +1720,11 @@ button.wise-csv-btn .fa {
   background-color: #ffffff !important;
   color: var(--bs-primary, #0071bc) !important;
   font-weight: 600 !important;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06) !important;
+  /* The inset 1px brand-blue edge keeps the selected pill distinguishable
+     from the #f1f3f5 track (4.6:1); white on the track alone is 1.1:1
+     (WCAG 1.4.11). */
+  box-shadow: inset 0 0 0 1px var(--bs-primary, #0071bc),
+    0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.06) !important;
 }
 
 .toggle-slider input[type="radio"]:focus-visible + span,
@@ -1818,6 +1875,14 @@ input.form-control:disabled {
   flex: 1 1 auto;
   margin-bottom: 0 !important;
   min-width: 0;
+}
+
+/* CR-A11Y-04: these inputs carry a visually hidden label (the visible text
+   is the adjacent .sp-inline-label); keep the empty <label> from adding
+   space. */
+.sp-inline-slider .shiny-input-container > label.control-label,
+.sp-targeting-select .shiny-input-container > label.control-label {
+  margin: 0;
 }
 
 .sp-budget-mode {
@@ -1973,7 +2038,7 @@ input.form-control:disabled {
 }
 
 .step2-summary-separator {
-  color: #9fb0be;
+  color: #5f6f7d;
   font-size: 0.78rem;
   font-weight: 700;
 }
@@ -2006,8 +2071,8 @@ input.form-control:disabled {
 .wise-table td.num, .wise-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .wise-table .group td { background: #eef3f8; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; color: #526575; text-align: left; }
 .wise-table tr.hi td { background: #eef7f2; }
-.wise-table .se { color: #718292; font-size: 0.8rem; }
-.wise-table .t2-note { color: #718292; font-size: 0.75rem; text-align: left; border-bottom: none; }
+.wise-table .se { color: #5f6f7d; font-size: 0.8rem; }
+.wise-table .t2-note { color: #5f6f7d; font-size: 0.75rem; text-align: left; border-bottom: none; }
 
 /* Reactable group separator / weather-highlight rows for the Step 1
    regression tables (rowClass from .t2_reactable_row_class()). Mirrors the

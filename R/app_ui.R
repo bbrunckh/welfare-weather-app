@@ -5,7 +5,7 @@
 #' @import shiny
 #' @noRd
 app_ui <- function(request) {
-  bslib::page_navbar(
+  page <- bslib::page_navbar(
     title = tagList(
       "WISE-APP",
       tags$span(class = "app-version", golem::get_golem_version())
@@ -14,7 +14,14 @@ app_ui <- function(request) {
     lang = "en",
     theme = bslib::bs_theme(
       version = 5,
-      brand   = app_sys("app/_brand.yml")
+      brand   = app_sys("app/_brand.yml"),
+      # R2-A11Y-02 (WCAG 1.4.11): Bootstrap's default focus glow is the
+      # primary colour at 25% alpha (about 1.4:1 on white). Use a solid 2px
+      # ring in the brand blue instead (5.1:1 on white, 3.1:1 on the navbar).
+      "input-btn-focus-width"         = "2px",
+      "input-btn-focus-color-opacity" = 1,
+      "focus-ring-width"              = "2px",
+      "focus-ring-opacity"            = 1
     ),
     navbar_options = bslib::navbar_options(theme = "dark", bg = "#002244"),
     header = tagList(
@@ -94,6 +101,26 @@ app_ui <- function(request) {
       )
     )
   )
+  add_main_landmark(page)
+}
+
+#' Skip link and main landmark for the navbar page (R2-A11Y-05)
+#'
+#' page_navbar() has no slot before the navbar and renders its panels in a
+#' plain div, so mark the top-level tab content as the `main` landmark and
+#' put a "Skip to main content" link first in the tab order.
+#' @noRd
+add_main_landmark <- function(page) {
+  tq <- htmltools::tagQuery(page)
+  tq$find(".tab-content")$
+    filter(function(x, i) i == 1L)$
+    addAttrs(id = "main-content", role = "main", tabindex = "-1")
+  tq$resetSelected()$find("nav.navbar")$before(
+    tags$a(class = "skip-link", href = "#main-content", "Skip to main content")
+  )
+  out <- tq$allTags()
+  class(out) <- class(page)
+  out
 }
 
 #' Add external Resources to the Application

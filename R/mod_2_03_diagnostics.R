@@ -228,6 +228,7 @@ mod_2_03_diagnostics_server <- function(id,
       pill_toggle(
         ns("diag_weather_vars"),
         label = NULL,
+        aria_label = "Weather variable",
         choices = choices, selected = selected[[1L]],
         layout = "horizontal"
       )
@@ -241,6 +242,7 @@ mod_2_03_diagnostics_server <- function(id,
       pill_toggle(
         ns("diag_weather_scenario"),
         label = NULL,
+        aria_label = "Scenario and period",
         choices = c(
           "All scenarios and periods" = "all",
           stats::setNames(sc_all, sc_all)

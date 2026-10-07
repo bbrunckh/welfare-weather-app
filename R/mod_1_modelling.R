@@ -47,7 +47,7 @@ mod_1_modelling_ui <- function(id) {
         )
       )
     ),
-    h4("How much does weather affect welfare? Who is most affected?",
+    h1("How much does weather affect welfare? Who is most affected?",
       class = "step-question"
     ),
     tabsetPanel(
@@ -58,7 +58,7 @@ mod_1_modelling_ui <- function(id) {
         div(
           class = "empty-state overview-empty-state",
           icon("chart-line"),
-          h5("No results yet"),
+          h2(class = "h5", "No results yet"),
           p(paste(
             "Work through the sidebar: choose your sample, define the outcome,",
             "configure weather variables, then run the model.",

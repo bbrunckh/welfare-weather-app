@@ -87,7 +87,7 @@ welfare_equation_ui <- function(predicted = FALSE) {
   }
 
   htmltools::tagList(
-    shiny::h5(if (predicted) "Predicted welfare" else "Welfare function"),
+    shiny::h2(class = "h5", if (predicted) "Predicted welfare" else "Welfare function"),
     shiny::tags$div(class = "wise-equation", wise_math(eq, display = TRUE)),
     shiny::tags$ul(
       shiny::tags$li(
