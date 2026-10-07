@@ -39,7 +39,7 @@
     if ("baseline_mean" %in% names(decomp_df)) {
       baseline <- suppressWarnings(as.numeric(decomp_df$baseline_mean))
     } else if (all(is.finite(ids))) {
-      baseline <- suppressWarnings(as.numeric(baseline_svy[[outcome]][ids]))
+      baseline <- .baseline_outcome_level(baseline_svy, so)[ids]
     } else if ("baseline_annual" %in% names(decomp_df)) {
       field <- "baseline_annual"
       baseline <- suppressWarnings(as.numeric(decomp_df[[field]]))
@@ -51,12 +51,16 @@
       weights <- .decomp_weights(baseline_svy)
       baseline_by_decile <- vapply(sort(unique(decomp_df$decile)), function(d) {
         keep <- baseline_deciles == d
-        .weighted_mean_safe(as.numeric(baseline_svy[[outcome]][keep]), weights[keep])
+        .weighted_mean_safe(
+          .baseline_outcome_level(baseline_svy, so)[keep], weights[keep]
+        )
       }, numeric(1))
       baseline <- unname(baseline_by_decile[as.character(decomp_df$decile)])
     } else {
-      baseline <- rep(.weighted_mean_safe(as.numeric(baseline_svy[[outcome]]),
-        .decomp_weights(baseline_svy)), nrow(decomp_df))
+      baseline <- rep(.weighted_mean_safe(
+        .baseline_outcome_level(baseline_svy, so),
+        .decomp_weights(baseline_svy)
+      ), nrow(decomp_df))
     }
     out <- data.frame(
       main = (exp(main) - 1) * baseline,
@@ -105,6 +109,16 @@
   }))
 }
 
+# Observed baseline outcome on the outcome-currency level scale (CR-BUG-02):
+# the stored 2021 PPP column times ppp2021 for an LCU outcome. This is the
+# level the log effects were computed on and the unit the results are shown in.
+.baseline_outcome_level <- function(baseline_svy, so) {
+  outcome_level_scale(
+    suppressWarnings(as.numeric(baseline_svy[[so$name]])), so,
+    .outcome_ppp(baseline_svy)
+  )
+}
+
 # Observed weighted baseline mean of the outcome, overall (decile = NULL) or
 # for one baseline welfare decile. Denominator for relative-change display:
 # effects are measured against observed baseline welfare, so the ratio of means
@@ -112,7 +126,7 @@
 .decomposition_baseline_mean <- function(so, baseline_svy, decile = NULL) {
   outcome <- so$name %||% ""
   if (is.null(baseline_svy) || !outcome %in% names(baseline_svy)) return(NA_real_)
-  y <- suppressWarnings(as.numeric(baseline_svy[[outcome]]))
+  y <- .baseline_outcome_level(baseline_svy, so)
   w <- .decomp_weights(baseline_svy)
   if (!is.null(decile)) {
     d <- weighted_baseline_deciles(baseline_svy, outcome, baseline_weight_column(baseline_svy))

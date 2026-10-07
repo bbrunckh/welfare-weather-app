@@ -7,7 +7,7 @@
       context$svy_baseline, context$deltas, context$sp_transfer,
       hazards, weather_vars, context$rif_grid, context$taus,
       context$train_data, context$outcome, context$is_log,
-      skip_coef = TRUE, central_only = TRUE, context = context
+      skip_coef = TRUE, central_only = TRUE, context = context, so = context$so
     )
   } else {
     suppressWarnings(.decompose_ols(
@@ -278,8 +278,10 @@
       # Outcome-unit channels, converted household by household against the
       # observed baseline outcome (the level each log effect was computed on).
       # Averaging log effects first and converting afterwards is biased.
-      lvl <- .policy_level_channels(ch, is_log_outcome, as.numeric(
-        prepared$context$svy_baseline[[prepared$context$outcome]])[pipeline$svy_row_id[rows]])
+      # CR-BUG-02: observed baseline on the outcome-currency level scale (the
+      # model scale of the log effects), not the stored 2021 PPP column.
+      lvl <- .policy_level_channels(ch, is_log_outcome,
+        as.numeric(prepared$context$y_level_baseline)[pipeline$svy_row_id[rows]])
       lvl_weight <- weights * is.finite(lvl)
       lvl[!is.finite(lvl)] <- 0
       for (k in seq_along(.compact_level_channels)) {

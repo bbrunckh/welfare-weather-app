@@ -34,9 +34,10 @@ prepare_outcome_df <- function(df, so) {
   trans <- as.character(so$transform[1])
   povline <- so$povline[1]
 
-  if (isTRUE(units == "LCU") && isTRUE(trans == "log") &&
-    "ppp2021" %in% names(df) && name %in% names(df)) {
-    df <- df |> dplyr::mutate(!!name := .data[[name]] * .data$ppp2021)
+  if ("ppp2021" %in% names(df) && name %in% names(df)) {
+    df <- df |> dplyr::mutate(
+      !!name := outcome_level_scale(.data[[name]], so, .data$ppp2021)
+    )
   }
   if (isTRUE(trans == "log")) {
     df <- df |> dplyr::mutate(!!name := log(.data[[name]]))
@@ -48,6 +49,92 @@ prepare_outcome_df <- function(df, so) {
   }
 
   df
+}
+
+
+# Outcome scale helpers (CR-BUG-02) ----
+#
+# The stored survey outcome is 2021 PPP. A continuous (log-transformed)
+# outcome in LCU is trained, predicted and reported in 2021 LCU, i.e. stored
+# welfare times `ppp2021`. Every place that combines the stored baseline outcome
+# (or an SP transfer, which is stored on the same scale) with model-scale
+# values - the RIF quantile assignment, the decomposition channels, the level
+# conversion - must go through these two helpers, so there is one definition of
+# the model scale and `prepare_outcome_df()` uses the same one.
+
+#' Stored outcome values on the outcome-currency level scale
+#'
+#' Multiplies by `ppp2021` when the outcome is a log-transformed LCU outcome,
+#' exactly as `prepare_outcome_df()` does before fitting. Every other outcome
+#' (PPP, binary, non-log) and any call without a `ppp2021` vector passes
+#' through unchanged.
+#'
+#' @param y Numeric vector on the stored (2021 PPP) scale, or an SP transfer.
+#' @param so Selected-outcome metadata (`units`, `transform`); NULL or missing
+#'   fields leave `y` unchanged.
+#' @param ppp Numeric vector of `ppp2021` factors, one per element of `y`
+#'   (NULL when the data carry no deflators).
+#' @return Numeric vector, same length as `y`.
+#' @keywords internal
+outcome_level_scale <- function(y, so, ppp = NULL) {
+  if (is.null(ppp) || !isTRUE(as.character(so$units[1L]) == "LCU") ||
+    !isTRUE(as.character(so$transform[1L]) == "log")) {
+    return(y)
+  }
+  if (length(ppp) != length(y)) {
+    stop("outcome_level_scale(): `ppp` must have one value per outcome value.",
+      call. = FALSE
+    )
+  }
+  y * suppressWarnings(as.numeric(ppp))
+}
+
+#' Stored outcome values on the scale the model was trained on
+#'
+#' `outcome_level_scale()`, then `log()` when the outcome is log-transformed.
+#' This is the scale of `train_data[[outcome]]`, of the RIF empirical CDF and
+#' of every `delta_*` channel.
+#'
+#' @inheritParams outcome_level_scale
+#' @param floor Optional lower bound applied before the log (the
+#'   decomposition uses `1e-10`); ignored for non-log outcomes.
+#' @return Numeric vector, same length as `y`.
+#' @keywords internal
+outcome_to_model_scale <- function(y, so, ppp = NULL, floor = NULL) {
+  lvl <- outcome_level_scale(y, so, ppp)
+  if (!isTRUE(as.character(so$transform[1L]) == "log")) {
+    return(lvl)
+  }
+  if (!is.null(floor)) lvl <- pmax(lvl, floor)
+  log(lvl)
+}
+
+# `ppp2021` column of a survey frame, or NULL when it carries no deflators.
+.outcome_ppp <- function(svy) {
+  if (is.data.frame(svy) && "ppp2021" %in% names(svy)) svy$ppp2021 else NULL
+}
+
+# Stop when baseline and training outcomes are plainly on different scales.
+# A PPP baseline against an LCU-trained model differs by log(ppp2021) (about 5
+# on the log scale for many currencies), far beyond any real difference
+# between a baseline round and the training sample.
+.assert_outcome_scales_match <- function(baseline, train, is_log, where) {
+  b <- stats::median(baseline[is.finite(baseline)])
+  t <- stats::median(train[is.finite(train)])
+  if (!is.finite(b) || !is.finite(t)) {
+    return(invisible(TRUE))
+  }
+  gap <- if (isTRUE(is_log)) abs(b - t) else abs(log(abs(b) / abs(t)))
+  if (is.finite(gap) && gap > log(10)) {
+    stop(
+      where, ": the baseline outcome (median ", signif(b, 3),
+      ") and the training outcome (median ", signif(t, 3),
+      ") are on different scales. A currency mismatch (2021 PPP vs LCU) is the",
+      " usual cause.",
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
 }
 
 

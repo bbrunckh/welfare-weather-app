@@ -612,7 +612,8 @@ run_sim_pipeline <- function(weather_raw,
       train_data   = train_data,
       outcome      = so$name,
       is_log       = isTRUE(so$transform == "log"),
-      deltas       = rif_policy_deltas
+      deltas       = rif_policy_deltas,
+      so           = so
     )
     # corr is one entry per household (nrow(svy_baseline)); broadcast it to
     # each expanded survey*weather row via .svy_row_id (set by predict_rif()
@@ -643,7 +644,9 @@ run_sim_pipeline <- function(weather_raw,
   # SP_TRANSFER_COL, so `out` wouldn't have it anyway - the guard is
   # defensive.)
   sp_vec <- if (!is_rif_policy && SP_TRANSFER_COL %in% names(out)) {
-    out[[SP_TRANSFER_COL]]
+    # CR-BUG-02: y_point is on the model scale (LCU for an LCU outcome); the
+    # transfer column is stored 2021 PPP, so convert it before adding.
+    outcome_level_scale(out[[SP_TRANSFER_COL]], so, .outcome_ppp(out))
   } else {
     NULL
   }

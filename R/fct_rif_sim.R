@@ -494,7 +494,13 @@ predict_rif <- function(fit_multi, newdata, svy, train_data, taus, outcome,
   # train_data[[outcome]] is already in model scale (log-transformed by
   # prepare_outcome_df before fitting), so ecdf and predictions are in log scale.
   is_log <- isTRUE(so$transform == "log")
-  y_baseline <- if (is_log) log(y_raw) else y_raw
+  # CR-BUG-02: the stored baseline is 2021 PPP; for an LCU outcome the model,
+  # its ECDF and the RIF coefficients are on log(welfare * ppp2021). Bring the
+  # baseline onto the same scale before assigning quantile positions.
+  y_baseline <- outcome_to_model_scale(y_raw, so, .outcome_ppp(svy)[svy_row])
+  .assert_outcome_scales_match(
+    y_baseline, train_data[[outcome]], is_log, "predict_rif()"
+  )
 
   # Assign quantile position via ecdf of training data (in model scale).
   # Reuse a caller-supplied ecdf when available (see PERF-27); otherwise

@@ -106,6 +106,9 @@
 #' @param skip_coef Logical. When TRUE, all per-channel SEs are returned as 0.
 #' @param central_only Logical. When TRUE, omit all coefficient-SE work and
 #'   return only the channel values needed to form `delta_total`.
+#' @param so Optional selected-outcome metadata. Only used when no `context`
+#'   supplies the baseline: it tells the fallback whether the stored (2021 PPP)
+#'   baseline must be moved to the LCU model scale (CR-BUG-02).
 #' @param F_hat Optional pre-built empirical CDF of the training outcome
 #'   (\code{stats::ecdf(train_data[[outcome]])}). The ecdf is weather- and
 #'   policy-independent, so per-year/per-scenario callers can build it once
@@ -122,7 +125,8 @@
                                   skip_coef = FALSE,
                                   central_only = FALSE,
                                   F_hat = NULL,
-                                  context = NULL) {
+                                  context = NULL,
+                                  so = NULL) {
   n <- nrow(svy_baseline)
 
   # Only use model 3 coefficients
@@ -169,10 +173,12 @@
   }
 
   # Baseline welfare in model scale
-  y_baseline <- context$y_baseline %||% {
-    y_raw <- svy_baseline[[outcome]]
-    if (is_log) log(pmax(y_raw, 1e-10)) else y_raw
-  }
+  # CR-BUG-02: on the model scale (LCU outcomes are log(welfare * ppp2021)).
+  y_baseline <- context$y_baseline %||% outcome_to_model_scale(
+    svy_baseline[[outcome]],
+    so %||% list(transform = if (is_log) "log" else "none"),
+    .outcome_ppp(svy_baseline), floor = 1e-10
+  )
 
   # Baseline quantile position via ecdf of training outcome
   # PERF-22: reuse a caller-supplied ecdf when available - it depends only
@@ -589,6 +595,19 @@
 }
 
 
+# SP transfer on the outcome scale (CR-BUG-02). `SP_TRANSFER_COL` is stored on
+# the stored-welfare (2021 PPP) scale; for an LCU outcome the channels work in
+# LCU, so the transfer is converted with the baseline's ppp2021 (same rows as
+# the policy frame). Zeros when the policy frame carries no transfer.
+.policy_sp_transfer <- function(svy_policy, svy_baseline, so) {
+  sp <- if (SP_TRANSFER_COL %in% names(svy_policy)) {
+    svy_policy[[SP_TRANSFER_COL]]
+  } else {
+    rep(0, nrow(svy_baseline))
+  }
+  outcome_level_scale(sp, so, .outcome_ppp(svy_baseline))
+}
+
 #' Build the immutable state shared by all panels in one policy run
 #'
 #' Weather hazards are deliberately not part of this object: a historical
@@ -634,13 +653,22 @@
   deltas <- deltas %||% .compute_policy_deltas(
     svy_baseline, svy_policy, outcome, weather_vars
   )
-  sp_transfer <- if (SP_TRANSFER_COL %in% names(svy_policy)) {
-    svy_policy[[SP_TRANSFER_COL]]
-  } else {
-    rep(0, n)
-  }
+  sp_transfer <- .policy_sp_transfer(svy_policy, svy_baseline, so)
   y_raw <- svy_baseline[[outcome]]
-  y_baseline <- if (is_log) log(pmax(y_raw, 1e-10)) else y_raw
+  ppp <- .outcome_ppp(svy_baseline)
+  # CR-BUG-02: model scale (log of the outcome currency level) and the
+  # outcome-currency level used to convert log effects back to outcome units.
+  y_baseline <- outcome_to_model_scale(y_raw, so, ppp, floor = 1e-10)
+  y_level_baseline <- outcome_level_scale(y_raw, so, ppp)
+  # The RIF ECDF comes from the training outcome: refuse a baseline that is
+  # plainly on a different scale (2021 PPP against an LCU-trained model).
+  if (identical(engine, "rif") && !is.null(model_fit$train_data) &&
+    outcome %in% names(model_fit$train_data)) {
+    .assert_outcome_scales_match(
+      y_baseline, model_fit$train_data[[outcome]], is_log,
+      "Decomposition context"
+    )
+  }
   # R2-BUG-13: a row with a missing baseline outcome, lever delta or transfer
   # is treated as untreated (not dropped, not imputed): its deltas and transfer
   # are zero and its model-scale baseline is a finite placeholder (0), so every
@@ -670,7 +698,8 @@
     names(svy_baseline), value = TRUE, ignore.case = TRUE
   )
   baseline_cols <- unique(c(
-    outcome, "code", "year", "survname", "loc_id", "int_month", weather_vars, weight_cols
+    outcome, "code", "year", "survname", "loc_id", "int_month", "ppp2021",
+    weather_vars, weight_cols
   ))
   baseline_snapshot <- snapshot(as.data.frame(svy_baseline)[
     intersect(baseline_cols, names(svy_baseline))
@@ -695,7 +724,9 @@
     context_owned = TRUE,
     svy_baseline = baseline_snapshot,
     model_fit = model_snapshot,
-    so = snapshot(so[intersect(c("name", "transform", "type"), names(so))]),
+    so = snapshot(so[intersect(
+      c("name", "transform", "type", "units"), names(so)
+    )]),
     run_identity = run_identity,
     signature = .decomposition_context_signature(
       svy_baseline, svy_policy, model_fit, so, run_identity,
@@ -709,6 +740,7 @@
     weather_vars = snapshot(weather_vars), deltas = snapshot(deltas),
     sp_transfer = snapshot(sp_transfer),
     y_baseline = snapshot(y_baseline),
+    y_level_baseline = snapshot(y_level_baseline),
     n_na_untreated = n_na_untreated,
     skip_coef = isTRUE(skip_coef), F_hat = F_hat,
     baseline_deciles = snapshot(baseline_deciles %||% weighted_baseline_deciles(
@@ -873,6 +905,9 @@
 #'   pass them in (PERF-22). When NULL they are computed here.
 #' @param F_hat        Optional pre-built ecdf of the training outcome (see
 #'   `.compute_rif_channels()`). When NULL it is computed here.
+#' @param so           Optional selected-outcome metadata; needed for LCU
+#'   outcomes so the stored PPP baseline and transfer are moved to the model
+#'   scale (CR-BUG-02).
 #' @return Numeric vector of length `nrow(svy_baseline)` giving delta_total
 #'   in model scale, or NULL if any required input is missing.
 #' @keywords internal
@@ -880,23 +915,21 @@
                                            weather_raw, weather_cols,
                                            rif_grid, taus, train_data,
                                            outcome, is_log,
-                                           deltas = NULL, F_hat = NULL) {
+                                           deltas = NULL, F_hat = NULL,
+                                           so = NULL) {
   if (is.null(svy_baseline) || is.null(svy_policy) ||
     is.null(rif_grid) || is.null(taus) || is.null(train_data) ||
     length(weather_cols) == 0L) {
     return(NULL)
   }
+  so <- so %||% list(name = outcome, transform = if (is_log) "log" else "none")
 
   n <- nrow(svy_baseline)
   deltas <- deltas %||% .compute_policy_deltas(
     svy_baseline, svy_policy,
     outcome, weather_cols
   )
-  sp_transfer <- if (SP_TRANSFER_COL %in% names(svy_policy)) {
-    svy_policy[[SP_TRANSFER_COL]]
-  } else {
-    rep(0, n)
-  }
+  sp_transfer <- .policy_sp_transfer(svy_policy, svy_baseline, so)
   hazard_values <- .compute_hazard_values(
     svy_baseline, weather_raw,
     weather_cols
@@ -916,7 +949,8 @@
     # SEs are not propagated into y_point; the sim pipeline expresses
     # uncertainty through coefficient draws / F_loading, not channel SDs.
     skip_coef     = TRUE,
-    F_hat         = F_hat
+    F_hat         = F_hat,
+    so            = so
   )
   if (is.null(channels)) {
     return(NULL)
@@ -996,11 +1030,7 @@
     svy_baseline, svy_policy, outcome, weather_vars
   )
 
-  sp_transfer <- if (SP_TRANSFER_COL %in% names(svy_policy)) {
-    svy_policy[[SP_TRANSFER_COL]]
-  } else {
-    rep(0, n)
-  }
+  sp_transfer <- .policy_sp_transfer(svy_policy, svy_baseline, so)
   hazard_values <- .decomposition_context_hazard_values(
     context, svy_baseline, weather_raw, weather_vars
   )
@@ -1020,7 +1050,8 @@
       skip_coef = TRUE,
       central_only = TRUE,
       F_hat = F_hat,
-      context = context
+      context = context,
+      so = so
     )
     if (is.null(channels)) {
       return(NULL)
@@ -1208,7 +1239,8 @@ decompose_policy_effect <- function(svy_baseline,
     is_log        = is_log,
     skip_coef     = skip_coef,
     F_hat         = F_hat,
-    context       = context
+    context       = context,
+    so            = so
   )
   if (is.null(channels)) {
     return(NULL)
@@ -1304,10 +1336,9 @@ decompose_policy_effect <- function(svy_baseline,
   }
 
   # Baseline welfare
-  y_baseline <- context$y_baseline %||% {
-    y_raw <- svy_baseline[[outcome]]
-    if (is_log) log(pmax(y_raw, 1e-10)) else y_raw
-  }
+  y_baseline <- context$y_baseline %||% outcome_to_model_scale(
+    svy_baseline[[outcome]], so, .outcome_ppp(svy_baseline), floor = 1e-10
+  )
 
   # --- Main effect ---
   delta_sp <- if (is_log) {
