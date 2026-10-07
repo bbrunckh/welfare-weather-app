@@ -193,12 +193,13 @@ test_that("a genuine builder failure is named, not silently dropped (UI-53)", {
 # ---- echarts figure PNG export (guidelines §7) -------------------------------
 
 test_that("an echarts figure renders to PNG through the headless browser", {
-  has_chrome <- tryCatch({
+  chrome_err <- tryCatch({
     ci <- chromote::Chromote$new()
     ci$close()
-    TRUE
-  }, error = function(e) FALSE)
-  skip_if_not(has_chrome, "no headless Chrome available")
+    NULL
+  }, error = function(e) conditionMessage(e))
+  skip_if(!is.null(chrome_err),
+    paste("no headless Chrome available:", chrome_err))
 
   widget <- echarts4r::e_charts(data.frame(x = 1:3, y = c(1, 4, 2)), x) |>
     echarts4r::e_bar(y)
