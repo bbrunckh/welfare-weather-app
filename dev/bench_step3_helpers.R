@@ -98,12 +98,8 @@
   policy_hist <- policy_result$hist_sim
   baseline_scenarios <- baseline_result$new_scenarios %||% list()
   policy_scenarios <- policy_result$saved_scenarios %||% list()
-  wrap_scenarios <- function(scenarios) lapply(scenarios, function(scenario) {
-    list(pipelines = scenario$pipelines %||% list(),
-         shared_context = scenario$shared_context %||% NULL)
-  })
-  baseline_scenarios <- wrap_scenarios(baseline_scenarios)
-  policy_scenarios <- wrap_scenarios(policy_scenarios)
+  # Scenarios are passed whole, as the app does: exposure recipes resolve
+  # against the owning scenario's weather signature.
   focus_scenario <- if (length(baseline_scenarios)) {
     names(baseline_scenarios)[[1L]]
   } else baseline_hist$hist_label %||% "Historical"
@@ -183,13 +179,17 @@
 }
 
 .bench_step3_annual_check <- function(pipeline, prepared, context,
-                                      run_identity, max_reference_rows) {
+                                      run_identity, max_reference_rows,
+                                      owner = NULL) {
   n <- length(pipeline$y_point)
+  # Compact (schema-2) pipelines carry an exposure recipe; the reference rows
+  # need the resolved table, rebuilt against the owning scenario.
+  pipeline$weather_exposure <- step2_exposure_resolve(pipeline, owner)
   rows <- seq_len(min(n, max(1L, as.integer(max_reference_rows))))
   sample_pipe <- .bench_step3_pipeline_rows(pipeline, rows, context)
   started <- proc.time()[["elapsed"]]
   optimized <- .policy_annual_channels(
-    pipeline, prepared, run_identity, rows = rows
+    pipeline, prepared, run_identity, rows = rows, owner = owner
   )
   optimized_seconds <- proc.time()[["elapsed"]] - started
   started <- proc.time()[["elapsed"]]
@@ -224,6 +224,7 @@
 
 .bench_step3_pipeline_pairs <- function(hist_sim, saved_scenarios) {
   out <- list(historical = list(
+    owner = hist_sim,
     pipeline = hist_sim$pipeline,
     weather = step2_resolve_weather(
       hist_sim$weather_raw %||% hist_sim$pipeline$weather_raw, hist_sim
@@ -234,6 +235,7 @@
     for (member_name in names(scenario$pipelines)) {
       pipe <- scenario$pipelines[[member_name]]
       out[[paste(scenario_name, member_name, sep = " / ")]] <- list(
+        owner = scenario,
         pipeline = pipe,
         weather = step2_resolve_weather(pipe$weather_raw %||% scenario$weather_raw,
                                         scenario)
@@ -379,7 +381,7 @@
       pipe <- pair$pipeline
       check <- tryCatch(.bench_step3_annual_check(
         pipe, annual_prepared, decomp_context, run_identity,
-        max_reference_rows
+        max_reference_rows, owner = pair$owner
       ), error = function(e) list(
         status = "error", error = conditionMessage(e),
         scope = "first_rows_per_pipeline", count = 0L,
