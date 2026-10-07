@@ -392,11 +392,7 @@ resolve_id_col <- function(a, b) {
 .prediction_profile_record <- function(profile, stage, started, value = NULL,
                                        rows = NA_integer_, detail = NULL) {
   if (is.null(profile)) return(invisible(NULL))
-  rss <- if (exists(".wx_process_tree_rss_bytes", mode = "function")) {
-    .wx_process_tree_rss_bytes()
-  } else {
-    NA_real_
-  }
+  rss <- .wx_process_tree_rss_bytes()
   profile$records[[length(profile$records) + 1L]] <- data.frame(
     stage = stage,
     elapsed_seconds = proc.time()[["elapsed"]] - started,

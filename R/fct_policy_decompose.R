@@ -711,18 +711,9 @@
     y_baseline = snapshot(y_baseline),
     n_na_untreated = n_na_untreated,
     skip_coef = isTRUE(skip_coef), F_hat = F_hat,
-    baseline_deciles = snapshot(baseline_deciles %||% if (exists("weighted_baseline_deciles",
-      mode = "function"
-    )) {
-      weight_col <- if (exists("baseline_weight_column", mode = "function")) {
-        baseline_weight_column(baseline_snapshot)
-      } else {
-        NULL
-      }
-      weighted_baseline_deciles(baseline_snapshot, outcome, weight_col)
-    } else {
-      NULL
-    }),
+    baseline_deciles = snapshot(baseline_deciles %||% weighted_baseline_deciles(
+      baseline_snapshot, outcome, baseline_weight_column(baseline_snapshot)
+    )),
     hazard_products = setNames(lapply(weather_panels, function(panel) {
       .compute_hazard_values(baseline_snapshot, panel, weather_vars)
     }), weather_keys),
