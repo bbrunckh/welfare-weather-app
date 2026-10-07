@@ -61,3 +61,45 @@
   message("[wiseapp] ", line)
   invisible(line)
 }
+
+# User-facing errors (CR-SEC-08) ----
+
+#' Log an error in full and return a short message for the user.
+#'
+#' Raw condition messages can contain hosts, volume paths, file paths or SQL.
+#' The full condition goes to the server log under a short id; the user sees a
+#' classified message with the same id, so support can find the log line.
+#' Messages without a URL or path are short enough to show as they are.
+#'
+#' @param e A condition (or a character message).
+#' @param context Optional prefix such as "Simulation".
+#' @return A single string for a notification or status panel.
+#' @noRd
+wise_user_error <- function(e, context = NULL) {
+  msg <- if (inherits(e, "condition")) conditionMessage(e) else paste(as.character(e), collapse = " ")
+  id <- substr(digest::digest(list(Sys.time(), Sys.getpid(), basename(tempfile()))), 1L, 8L)
+  message("[wiseapp] error id=", id,
+    if (!is.null(context)) paste0(" context=", context),
+    " class=", class(e)[1L], ": ", msg)
+  first <- trimws(strsplit(msg, "\n", fixed = TRUE)[[1]][1L] %||% "")
+  text <- if (inherits(e, "wise_async_error")) {
+    first
+  } else if (grepl("Timed out|timeout", msg, ignore.case = TRUE)) {
+    "The operation took too long and was stopped."
+  } else if (grepl("HTTP 40[13]|Unauthori[sz]ed|Forbidden|OAuth|credential", msg, ignore.case = TRUE)) {
+    "The data source rejected the request. Check the connection credentials."
+  } else if (grepl("HTTP 404|not found|No files found|does not exist", msg, ignore.case = TRUE)) {
+    "A required data file was not found at the data source."
+  } else if (grepl("HTTP [0-9]{3}|Could not resolve|Connection (refused|reset)|curl", msg, ignore.case = TRUE)) {
+    "The data source could not be reached."
+  } else if (grepl("cannot allocate|out of memory", msg, ignore.case = TRUE)) {
+    "The server ran out of memory. Try a smaller selection."
+  } else if (nzchar(first) && nchar(first) <= 200L &&
+             !grepl("://|(^|[ (='\"])[~.]?/[^ ]|[A-Za-z]:\\\\|SELECT |FROM ", first)) {
+    first
+  } else {
+    "An unexpected error occurred."
+  }
+  paste0(if (!is.null(context)) paste0(context, " failed: "), text,
+    " (error id ", id, ")")
+}

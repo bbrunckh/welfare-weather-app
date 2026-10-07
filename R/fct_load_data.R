@@ -587,11 +587,11 @@ collect_deterministic <- function(data, keys = NULL) {
 
 .parse_db_csv_response <- function(resp, url) {
   if (inherits(resp, "error") || httr2::resp_is_error(resp)) {
-    stop(
-      "load_data(): Failed to fetch CSV from Databricks (", url, "): ",
-      .http_error_summary(resp),
-      call. = FALSE
-    )
+    # CR-SEC-08: the URL (host and volume path) goes to the log only.
+    stop(wise_user_error(
+      simpleError(paste0("Failed to fetch ", url, ": ", .http_error_summary(resp))),
+      context = paste0("Reading ", basename(url), " from Databricks")
+    ), call. = FALSE)
   }
 
   readr::read_csv(httr2::resp_body_raw(resp), show_col_types = FALSE)

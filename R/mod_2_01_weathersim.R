@@ -1193,7 +1193,7 @@ mod_2_01_weathersim_server <- function(id,
                live_run(NULL)
               sim_guard$end()
               shiny::showNotification(
-                paste0("Simulation failed: ", conditionMessage(error)),
+                wise_user_error(error, "Simulation"),
                 type = "error", duration = 8
               )
             }
@@ -1204,7 +1204,7 @@ mod_2_01_weathersim_server <- function(id,
           live_run(NULL)
           sim_guard$end()
           shiny::showNotification(
-            paste0("Simulation failed: ", conditionMessage(e)),
+            wise_user_error(e, "Simulation"),
             type = "error", duration = 8
           )
           NULL
@@ -1344,7 +1344,7 @@ mod_2_01_weathersim_server <- function(id,
             ),
             error = function(e) {
               shiny::showNotification(
-                paste0("Simulation failed: ", conditionMessage(e)),
+                wise_user_error(e, "Simulation"),
                 type = "error", duration = 8
               )
               NULL
