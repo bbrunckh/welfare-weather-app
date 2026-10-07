@@ -117,7 +117,7 @@ test_that("aggregated total SE remains consistent under household weighting", {
   expect_lt(abs(v_total - v_components) / pmax(v_total, 1e-12), 1e-10)
 })
 
-test_that("decile decomposition plot uses engine-specific channels", {
+test_that("decile decomposition data uses engine-specific channels", {
   fx <- make_ols_fixture()
   r <- wiseapp::decompose_policy_effect(fx$svy_base, fx$svy_policy,
                                          fx$model_fit, fx$so)
@@ -127,11 +127,6 @@ test_that("decile decomposition plot uses engine-specific channels", {
   expect_true(all(c("cash_transfer_percent", "covariate_shift_percent",
                     "interaction_percent",
                     "repositioning_percent") %in% names(tbl)))
-  p <- wiseapp:::plot_decomposition_channels_by_decile(tbl, is_rif = FALSE)
-  expect_s3_class(p, "ggplot")
-  expect_false("Resilience - Repositioning effect" %in% as.character(p$data$channel))
-  expect_true(all(c("Main effect (covariate shift)",
-                    "Resilience - Interaction effect") %in% as.character(p$data$channel)))
 })
 
 test_that("decomposition module renders core plots for OLS and RIF schemas", {

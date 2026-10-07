@@ -26,8 +26,6 @@ make_ridge_sim_inputs <- function(n = 300L) {
 }
 
 test_that("simulation ridge data precomputes bounded curves", {
-  skip_if_not_installed("ggplot2")
-
   x <- make_ridge_sim_inputs()
   out <- build_ridge_kde_data(
     x$hist, x$scenario, "welfare", actual_vals = rnorm(500, 2, 0.4)
@@ -40,18 +38,4 @@ test_that("simulation ridge data precomputes bounded curves", {
   expect_equal(nrow(out$ridge_curves$hist[[1]]), 512L)
   expect_equal(nrow(out$ridge_curves$predicted), 512L)
   expect_true(all(is.finite(out$ridge_curves$hist[[1]]$density_raw)))
-})
-
-test_that("simulation ridge display modes render from prepared curves", {
-  skip_if_not_installed("ggplot2")
-
-  x <- make_ridge_sim_inputs(100L)
-  kde <- build_ridge_kde_data(x$hist, x$scenario, "welfare")
-
-  for (mode in c("hist_year", "scenario", "forecast_yr")) {
-    expect_s3_class(
-      plot_year_anchored_ridge(kde, "Welfare", primary_group = mode),
-      "ggplot"
-    )
-  }
 })

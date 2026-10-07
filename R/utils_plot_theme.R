@@ -1,51 +1,3 @@
-#' Shared ggplot2 theme and colour system for all WISE-APP plots
-#'
-#' UI panel headers own plot titles; in-plot titles are removed wherever
-#' redundant. Text sizes are floored so labels stay readable at Shiny's
-#' default 72 dpi rendering (1 pt == 1 px on screen). Per-plot
-#' `+ theme(...)` overrides layered after this still win.
-#'
-#' @param base_size Base font size, default 16 for full-card plots. Use 13-14
-#'   only for multi-panel patchwork layouts; never below 13.
-#' @param ... Passed to [ggplot2::theme_minimal()].
-#' @noRd
-
-theme_wise <- function(base_size = 16, ...) {
-  ggplot2::theme_minimal(base_size = base_size, ...) +
-    ggplot2::theme(
-      plot.title = ggplot2::element_text(
-        size = ggplot2::rel(1.0),
-        face = "bold", hjust = 0
-      ),
-      plot.subtitle = ggplot2::element_text(
-        size = ggplot2::rel(0.85),
-        colour = "grey40"
-      ),
-      plot.caption = ggplot2::element_text(
-        size = ggplot2::rel(0.8),
-        colour = "grey40", hjust = 0
-      ),
-      axis.title = ggplot2::element_text(
-        size = ggplot2::rel(1.0),
-        colour = .wise_charcoal
-      ),
-      axis.text = ggplot2::element_text(
-        size = ggplot2::rel(0.85),
-        colour = .wise_slate
-      ),
-      legend.title = ggplot2::element_text(size = ggplot2::rel(0.9)),
-      legend.text = ggplot2::element_text(size = ggplot2::rel(0.85)),
-      strip.text = ggplot2::element_text(size = ggplot2::rel(0.95), face = "bold"),
-      panel.grid.major = ggplot2::element_line(
-        colour = "#E3E9EE",
-        linewidth = 0.4
-      ),
-      panel.grid.minor = ggplot2::element_blank(),
-      legend.position = "bottom",
-      legend.justification = "left"
-    )
-}
-
 # Brand tokens (inst/app/_brand.yml) ----
 # Single source for plot colours so figures match the UI.
 
@@ -86,24 +38,6 @@ theme_wise <- function(base_size = 16, ...) {
 )
 .wise_cat <- .okabe_ito
 
-#' Colorblind-safe discrete scales (Okabe-Ito, blue-first), UI-04.
-#' `...` forwards to [ggplot2::scale_colour_manual()] (name, breaks, labels, ...).
-#' @name wise_scale_cat
-#' @noRd
-wise_scale_colour_cat <- function(...) {
-  ggplot2::scale_colour_manual(values = .wise_cat, ...)
-}
-
-#' @rdname wise_scale_cat
-#' @noRd
-wise_scale_fill_cat <- function(...) {
-  ggplot2::scale_fill_manual(values = .wise_cat, ...)
-}
-
-# Backwards-compatible aliases for the original wrapper names.
-wise_scale_colour_okabe_ito <- wise_scale_colour_cat
-wise_scale_fill_okabe_ito <- wise_scale_fill_cat
-
 # SSP scenario colours ----
 # Fixed semantic mapping (not positional): lower emissions = green, mid = blue,
 # high = vermillion. Canonical keys must match .normalise_ssp().
@@ -123,27 +57,12 @@ wise_seq_ramp <- function(n) {
   grDevices::colorRampPalette(c("#D9EFF8", "#0071BC", "#002244"))(n)
 }
 
-# Shared placeholder ----
-
-#' Uniform placeholder for figures whose inputs are unavailable.
-#' Replaces the per-file `blank_plot()` copies and base-graphics fallbacks.
-#' @noRd
-blank_plot <- function(message = "Not available", size = 4.2) {
-  ggplot2::ggplot() +
-    ggplot2::annotate("text",
-      x = 0.5, y = 0.5, label = message,
-      size = size, colour = "grey40"
-    ) +
-    ggplot2::theme_void()
-}
-
 # Shared echarts4r styling (guidelines §7) ----
-# echarts4r counterpart of `theme_wise()`: same colour tokens and type scale,
-# applied as widget opts so every interactive chart matches the ggplot figures.
+# Shared ECharts styling and WISE color tokens.
 
 #' Style fragments for echarts4r axes, legends and tooltips
 #'
-#' Mirrors [theme_wise()] on the echarts side. echarts4r replaces whole option
+#' Uses the shared WISE color tokens. echarts4r replaces whole option
 #' blocks on each `e_*()` call, so the theme ships as fragments to pass inside
 #' the builders' own axis/legend calls:
 #'
@@ -209,7 +128,7 @@ wise_elegend_style <- function(...) {
 
 #' @rdname wise_eaxis_label
 #' @param e         An `echarts4r` widget (as returned by the `e_*` verbs).
-#' @param base_size Unused today; kept for parity with [theme_wise()].
+#' @param base_size Unused; retained for internal call-site compatibility.
 #' @noRd
 wise_echart_theme <- function(e, base_size = 14) {
   # Value axes should keep the regular interior ticks readable without
@@ -295,8 +214,7 @@ wise_echart_theme <- function(e, base_size = 14) {
 
 #' Uniform echarts placeholder for figures whose inputs are unavailable
 #'
-#' echarts counterpart of [blank_plot()]: an empty chart with a centred,
-#' slate message. Use it when the old ggplot builder rendered a message the
+#' Empty chart with a centred, slate message. Use it when a chart has a message the
 #' user can act on ("Insufficient data", "Select scenarios first"); charts
 #' that were simply empty can return `NULL` and let the render `req()` clear
 #' the output.

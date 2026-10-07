@@ -2092,24 +2092,9 @@ mod_2_02_results_server <- function(id,
       }))
     })
 
-    incidence_chart <- function() {
-      req(incidence_data_rv())
-      echart_incidence_by_decile(
-        incidence_data_rv(),
-        height = "420px"
-      )
-    }
     # Distributional incidence table: raw values; the CSV button for it
     # lives in the export bundle's reactable flow (there is no mounted UI
     # slot - the data table is exported as the bundle artefact below).
-    wise_export_figure(
-      key = "climate_distributional_incidence",
-      label = "Distributional incidence by baseline decile",
-      step = 2L,
-      fun = .committed_only(incidence_chart),
-      description = "Weighted household-level simulated effects by fixed observed baseline welfare decile.",
-      width = 10, height = 6
-    )
     wise_export_table(
       key = "climate_distributional_incidence_data",
       label = "Distributional incidence data",

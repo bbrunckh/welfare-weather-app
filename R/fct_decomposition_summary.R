@@ -267,7 +267,7 @@ echart_decomposition_channels_by_decile <- function(tbl,
       stringsAsFactors = FALSE
     )
   }))
-  # Keep the ggplot's channel stacking order (first channel at the base) and
+        # Keep the channel stacking order (first channel at the base) and
   # a numerically sorted decile category axis (marker series addresses
   # categories by index).
   decile_levels <- as.character(sort(unique(as.numeric(unique(long$decile)))))
@@ -313,7 +313,7 @@ echart_decomposition_channels_by_decile <- function(tbl,
     wise_echart_theme() |>
     .wise_zero_markline()
 
-  # Total-effect marker per decile (open dark-ringed dot in the ggplot
+  # Total-effect marker per decile (open dark-ringed dot in the static plot
   # version, drawn outside the stacked channels). Injected as a raw scatter
   # series so it never enters the channel legend or the channel stack.
   marker_pts <- lapply(seq_len(nrow(tbl)), function(i) {
@@ -413,67 +413,6 @@ decomposition_channels_by_decile <- function(decomp_df, svy = NULL,
   out
 }
 
-plot_decomposition_channels_by_decile <- function(tbl, is_rif = NULL) {
-  if (is.null(tbl) || !nrow(tbl)) {
-    return(blank_plot("Decile decomposition is unavailable for this run.", size = 4))
-  }
-  is_rif <- if (is.null(is_rif)) {
-    "repositioning_percent" %in% names(tbl) &&
-      any(abs(tbl$repositioning_percent) > 1e-12, na.rm = TRUE)
-  } else {
-    isTRUE(is_rif)
-  }
-  channel_cols <- c(
-    "cash_transfer_percent", "covariate_shift_percent",
-    if (is_rif) "repositioning_percent", "interaction_percent"
-  )
-  active <- vapply(channel_cols, function(col) {
-    any(abs(tbl[[col]]) > 1e-12, na.rm = TRUE)
-  }, logical(1L))
-  if (any(active)) channel_cols <- channel_cols[active]
-  channel_labels <- c(
-    cash_transfer_percent = "SP direct effect",
-    covariate_shift_percent = "Main effect (covariate shift)",
-    repositioning_percent = "Resilience - Repositioning effect",
-    interaction_percent = "Resilience - Interaction effect"
-  )
-  long <- tidyr::pivot_longer(
-    tbl[, c("decile", channel_cols)],
-    cols = tidyselect::all_of(channel_cols),
-    names_to = "channel", values_to = "effect"
-  )
-  long$channel <- factor(unname(channel_labels[long$channel]),
-    levels = unname(channel_labels[channel_cols])
-  )
-  # Colorblind-safe quartet from the shared categorical palette; the total
-  # marker stays neutral dark so it cannot be confused with a channel.
-  colours <- c(
-    "SP direct effect" = .wise_cat[[1]],
-    "Main effect (covariate shift)" = .wise_cat[[4]],
-    "Resilience - Repositioning effect" = .wise_cat[[3]],
-    "Resilience - Interaction effect" = .wise_cat[[6]]
-  )
-  ggplot2::ggplot(long, ggplot2::aes(
-    x = factor(.data$decile), y = .data$effect,
-    fill = .data$channel
-  )) +
-    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = .wise_zero) +
-    ggplot2::geom_col(position = "stack", width = 0.62) +
-    ggplot2::geom_point(
-      data = tbl,
-      ggplot2::aes(x = factor(.data$decile), y = .data$total_percent),
-      inherit.aes = FALSE, shape = 21, fill = "white",
-      colour = .wise_support, size = 2.8, stroke = 1.1
-    ) +
-    ggplot2::scale_fill_manual(values = colours, drop = FALSE) +
-    ggplot2::labs(
-      x = "Fixed observed baseline welfare decile (1 = poorest)",
-      y = "Policy effect (percent change)", fill = "Channel",
-      subtitle = NULL
-    ) +
-    theme_wise(base_size = 13) +
-    ggplot2::theme(legend.position = "bottom")
-}
 
 #' RIF weather-sensitivity beta curve (echarts4r)
 #'
@@ -485,8 +424,8 @@ plot_decomposition_channels_by_decile <- function(tbl, is_rif = NULL) {
 #' at 0/1 when no weather frame is supplied); echarts only draws the
 #' precomputed values.
 #'
-#' Judgment call vs the ggplot version: binned predictors draw one series per
-#' bin in a single panel (the ggplot facets one panel per bin), and the
+#' Judgment call vs the archived static version: binned predictors draw one
+#' series per bin in a single panel (the static plot facets one panel per bin), and the
 #' "Ribbon = 95% CI" caption is dropped (no in-chart text).
 #'
 #' @param rif_grid          The model fit's `rif_grid` data frame.
@@ -496,7 +435,7 @@ plot_decomposition_channels_by_decile <- function(tbl, is_rif = NULL) {
 #' @param height            Widget height.
 #'
 #' @return An `echarts4r` widget (never `NULL`; empty inputs render the same
-#'   user-facing messages as the ggplot builder).
+#'   user-facing messages as the static builder).
 #'
 #' @noRd
 echart_rif_weather_curve <- function(rif_grid, pred_var,
@@ -610,7 +549,7 @@ echart_rif_weather_curve <- function(rif_grid, pred_var,
             paste0(modx_lab_print, " = ", v_chr)
           }
         }
-        # The ggplot facets per bin; a single echarts panel draws one series
+        # The static plot facets per bin; a single echarts panel draws one series
         # per (bin, moderator level) so each tau appears once per series.
         bins <- unique(main_rows$.bin_id)
         bins <- bins[order(suppressWarnings(.bin_lower(bins)))]

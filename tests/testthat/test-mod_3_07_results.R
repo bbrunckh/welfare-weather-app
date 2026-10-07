@@ -273,20 +273,6 @@ test_that("step3_adverse_dot_data and plot_step3_adverse_dot work correctly", {
   expect_s3_class(dot_df, "data.frame")
   expect_true(nrow(dot_df) > 0L)
   expect_true(all(c("scenario", "rp_label", "baseline_val", "policy_val", "effect") %in% names(dot_df)))
-
-  plt <- plot_step3_adverse_dot(dot_df, x_label = "Consumption ($/day)")
-  expect_s3_class(plt, "ggplot")
-  # Design D: two constant-colour spread bands (transparent blue baseline,
-  # transparent vermillion policy) plus the solid arrow connector; no legend.
-  seg_layers <- Filter(function(l) inherits(l$geom, "GeomSegment"), plt$layers)
-  expect_true(length(seg_layers) >= 3L)
-  seg_cols <- vapply(seg_layers, function(l) l$aes_params$colour %||% NA_character_,
-                     character(1))
-  expect_true("#0072B2" %in% seg_cols)
-  expect_true("#D55E00" %in% seg_cols)
-  # Return-period names moved to the y axis: no blanked axis text.
-  y_scale <- plt$scales$get_scales("y")
-  expect_true(!is.null(y_scale$labels))
 })
 
 test_that("step3 adverse dot data carries model spread for baseline and policy", {
@@ -316,19 +302,9 @@ test_that("step3 adverse dot data carries model spread for baseline and policy",
   # RP with ensemble rows must carry finite bands for both series.
   expect_true(is.finite(dot_df$base_lo[rp10]) && is.finite(dot_df$base_hi[rp10]))
   expect_true(is.finite(dot_df$policy_lo[rp10]) && is.finite(dot_df$policy_hi[rp10]))
-
-  plt <- plot_step3_adverse_dot(dot_df, x_label = "Consumption ($/day)")
-  # Two constant-colour spread-segment layers (transparent blue baseline,
-  # transparent vermillion policy); the slate connector carries no mapping.
-  band_cols <- vapply(plt$layers, function(l) {
-    if (!inherits(l$geom, "GeomSegment")) return(NA_character_)
-    l$aes_params$colour %||% NA_character_
-  }, character(1))
-  expect_equal(sum(band_cols == "#0072B2", na.rm = TRUE), 1L)
-  expect_equal(sum(band_cols == "#D55E00", na.rm = TRUE), 1L)
 })
 
-test_that("Step 3 adverse plot uses Step 2 periods and historical support", {
+test_that("Step 3 adverse dot data uses Step 2 periods and historical support", {
   periods <- c("1:1", "1:5", "1:10", "1:20", "1:50")
   labels <- c("Equal-model mean", rep("Equal-model mean", 4))
   tbl <- tibble::tibble(

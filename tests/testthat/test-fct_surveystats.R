@@ -191,47 +191,6 @@ test_that("interview date summary reuses month and counts by wave", {
                c("A, 2018", "A, 2021", "B, 2021"))
 })
 
-test_that("interview date plot variants return ggplot objects", {
-  skip_if_not_installed("ggplot2")
-  d <- data.frame(
-    economy = rep("A", 4),
-    countryyear = rep(c("A, 2018", "A, 2021"), each = 2),
-    month_num = c(1L, 2L, 1L, 2L),
-    hh = c(10L, 15L, 12L, 9L)
-  )
-
-  for (variant in c("grouped", "faceted", "heatmap")) {
-    expect_s3_class(
-      plot_interview_dates(d, variant = variant, unit_label = "Firms"),
-      "ggplot"
-    )
-  }
-  expect_equal(plot_interview_dates(d, unit_label = "Individuals")$labels$y,
-               "Individuals")
-  p <- plot_interview_dates(d, palette = "sequential")
-  fill_scale <- p$scales$get_scales("fill")
-  expect_equal(unname(fill_scale$palette(2)), c("#0071BC", "#00A6C7"))
-  expect_equal(
-    unname(plot_interview_dates(d[4:1, ], palette = "sequential")$scales$get_scales("fill")$palette(2)),
-    c("#0071BC", "#00A6C7")
-  )
-  d_multi <- data.frame(
-    economy = rep(c("Benin", "Burkina Faso"), each = 4),
-    countryyear = rep(c("Benin, 2018", "Benin, 2021",
-                        "Burkina Faso, 2018", "Burkina Faso, 2021"),
-                      each = 2),
-    month_num = rep(1:2, 4),
-    hh = 1:8
-  )
-  p_multi <- plot_interview_dates(d_multi, palette = "sequential")
-  multi_cols <- unname(p_multi$scales$get_scales("fill")$palette(4))
-  expect_equal(multi_cols,
-               c("#0071BC", "#00A6C7", "#8667B3", "#C28C2C"))
-  expect_null(p_multi$scales$get_scales("fill")$name)
-  expect_equal(p_multi$theme$text$size, 13)
-  expect_null(plot_interview_dates(NULL))
-})
-
 test_that("P8: survey-wave metadata preserves wave ordering and labels", {
   df <- data.frame(
     code = c("TST", "TST", "ABC"),

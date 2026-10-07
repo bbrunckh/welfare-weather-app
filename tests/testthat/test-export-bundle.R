@@ -241,10 +241,9 @@ test_that("a req() throw inside a registered artefact leaves no failure note", {
 
 test_that("include= selects which parts are written", {
   skip_if_not_installed("zip")
-  skip_if_not_installed("ggplot2")
   fig <- item("plot", kind = "figure",
-              fun = function() ggplot2::ggplot(mtcars, ggplot2::aes(wt, mpg)) +
-                ggplot2::geom_point())
+              fun = function() echarts4r::e_charts(mtcars, wt) |>
+                echarts4r::e_scatter(mpg))
   items <- list(item("tbl"), fig)
 
   zf1 <- withr::local_tempfile(fileext = ".zip")
@@ -785,11 +784,10 @@ test_that("a table that cannot be written is skipped, not fatal", {
 
 test_that("a figure whose builder throws is skipped and named in the README", {
   skip_if_not_installed("zip")
-  skip_if_not_installed("ggplot2")
   items <- list(
     item("good_fig", kind = "figure",
-         fun = function() ggplot2::ggplot(mtcars, ggplot2::aes(wt, mpg)) +
-           ggplot2::geom_point()),
+         fun = function() echarts4r::e_charts(mtcars, wt) |>
+           echarts4r::e_scatter(mpg)),
     item("bad_fig", kind = "figure", label = "Broken figure",
          fun = function() stop("plot builder failed"))
   )

@@ -842,12 +842,8 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
     ))
   }
 
-  # Figures: ggplot objects render through ggsave with the ragg AGG device -
-  # the same renderer the on-screen plots use (shiny.useragg), so fonts and
-  # antialiasing in the PNG match what the user saw, and ragg is faster than
-  # the grDevices cairo path. echarts4r widgets render through a headless
-  # browser (htmlwidgets -> standalone HTML -> webshot2 screenshot), which is
-  # exactly the canvas ECharts paints on screen. Anything else is skipped
+  # Figures are UI-backed ECharts widgets, rendered through a headless browser
+  # using the same chart engine as the on-screen view. Anything else is skipped
   # rather than guessed at.
   tryCatch(
     {
@@ -856,12 +852,6 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
         if (res$status %in% c("error", "skipped")) {
           return(res)
         }
-      } else if (inherits(value, "ggplot")) {
-        ggplot2::ggsave(path,
-          plot = value, width = item$width,
-          height = item$height, dpi = 150, bg = "white",
-          device = ragg::agg_png
-        )
       } else {
         return(NULL)
       }
@@ -878,8 +868,8 @@ pipeline_runner <- function(triggers, results, on_state = NULL,
 #
 # The widget is written to a standalone HTML file (animation disabled so the
 # first paint is the final state), loaded in Chromium via webshot2, and
-# captured at the registry item's figure size (inches at the same 150 dpi the
-# ggplot path uses). Requires webshot2 and a Chrome/Chromium binary; when
+# captured at the registry item's figure size (inches at 150 dpi). Requires
+# webshot2 and a Chrome/Chromium binary; when
 # either is unavailable the figure is skipped with a note - one missing
 # capability costs that figure, not the bundle.
 #

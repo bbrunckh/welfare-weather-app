@@ -115,39 +115,6 @@ test_that("ridge tooltips retain distinct sample and historical series", {
   expect_equal(p$x$opts$xAxis$splitNumber, 6)
 })
 
-test_that("outcome distribution plots support continuous and binary outcomes", {
-  skip_if_not_installed("ggplot2")
-
-  df <- make_outcome_plot_df()
-  p_cont <- plot_welfare_dist(
-    df, outcome = "welfare", label = "Welfare", type = "numeric",
-    poverty_lines = NULL
-  )
-  p_bin <- plot_welfare_dist(
-    df, outcome = "poor", label = "Poor", type = "logical",
-    poverty_lines = NULL
-  )
-
-  expect_s3_class(p_cont, "ggplot")
-  expect_s3_class(p_bin, "ggplot")
-  expect_setequal(
-    unique(ggplot2::ggplot_build(p_cont)$data[[1]]$fill),
-    c("#0071BC")
-  )
-  expect_true(any(vapply(p_bin$layers, function(x) {
-    inherits(x$geom, "GeomRect")
-  }, logical(1))))
-  expect_true(any(vapply(p_bin$layers, function(x) {
-    inherits(x$geom, "GeomText")
-  }, logical(1))))
-  bin_data <- ggplot2::ggplot_build(p_bin)$data[[1]]
-  expect_setequal(unique(bin_data$fill), c("#D9EFF8", "#0071BC"))
-  expect_equal(
-    as.numeric(tapply(bin_data$ymax - bin_data$ymin, bin_data$x, sum)),
-    c(1, 1)
-  )
-})
-
 test_that("interactive outcome distributions honor currency and concise tooltips", {
   df <- make_outcome_plot_df(200L)
   df$ppp2021 <- rep(c(2, 4), each = 100)

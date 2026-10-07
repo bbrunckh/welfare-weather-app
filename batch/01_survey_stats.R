@@ -5,9 +5,6 @@
 #
 # Outputs:
 #   OUT_DIR/survey_stats/survey_stats.csv
-#   OUT_DIR/survey_stats/interview_dates/{CODE}_interview_dates.png
-#   OUT_DIR/survey_stats/location_maps/{CODE}_location_map.png
-#   OUT_DIR/survey_stats/welfare_distributions/{CODE}_welfare_dist.png
 #
 # All user inputs are in SECTION 1. 
 #
@@ -31,7 +28,6 @@ COUNTRY_FILTER <- NULL
 
 # ---- Output options ---------------------------------------------------------
 OVERWRITE_EXISTING <- TRUE
-SKIP_PLOTS <- TRUE # Set to TRUE to skip generating plots (for faster iteration when only stats CSV is needed)
 
 # =============================================================================
 # SECTION 2 — SETUP
@@ -43,12 +39,7 @@ invisible(lapply(list.files("batch/R", pattern = "\\.R$", full.names = TRUE), so
 
 # Output directories
 OUT_SURVEY   <- file.path(OUT_DIR, "survey_stats")
-OUT_DATES    <- file.path(OUT_SURVEY, "interview_dates")
-OUT_MAPS     <- file.path(OUT_SURVEY, "location_maps")
-OUT_WELDIST  <- file.path(OUT_SURVEY, "welfare_distributions")
-
-for (d in c(OUT_SURVEY, OUT_DATES, OUT_MAPS, OUT_WELDIST))
-  dir.create(d, showWarnings = FALSE, recursive = TRUE)
+dir.create(OUT_SURVEY, showWarnings = FALSE, recursive = TRUE)
 
 # Connection
 connection_params_01 <- if (identical(CONNECTION_TYPE, "databricks")) {
@@ -112,51 +103,6 @@ for (code in COUNTRIES_01) {
   })
   if (is.null(svy)) next
   cat(sprintf("  Loaded: %d rows\n", nrow(svy)))
-
-  # ------ Interview dates plot -----------------------------------------------
-  if (!SKIP_PLOTS) {
-    tryCatch({
-      p_dates  <- plot_interview_dates(summarise_interview_dates(svy))
-      out_path <- file.path(OUT_DATES, paste0(code, "_interview_dates.png"))
-      if (OVERWRITE_EXISTING || !file.exists(out_path))
-        save_gg(p_dates, out_path, width = 9, height = 4)
-    }, error = function(e) message("  interview dates failed: ", conditionMessage(e)))
-  }
-
-  # ------ Location map (static ggplot/sf) ------------------------------------
-  if (!SKIP_PLOTS) {
-    #skip for FJI
-    if (code == "FJI") {
-      cat("  SKIP — no location data for FJI\n")
-    } else {
-      out_path <- file.path(OUT_MAPS, paste0(code, "_location_map.png"))
-      if (OVERWRITE_EXISTING || !file.exists(out_path)) {
-        geojson <- build_h3_geojson(ss, connection_params_01)
-        if (is.null(geojson)) {
-          message("  location map skipped — build_h3_geojson returned NULL")
-        } else {
-          p_map <- tryCatch(
-            plot_survey_map_static(geojson),
-            error = function(e) { message("  plot_survey_map_static failed: ", conditionMessage(e)); NULL }
-          )
-          if (!is.null(p_map))
-            save_gg(p_map, out_path, width = 8, height = 6, dpi = 96)
-        }
-      }
-    }
-  }
-
-  # ------ Welfare distribution ridge plot ------------------------------------
-  if (!SKIP_PLOTS) {
-    tryCatch({
-      out_path <- file.path(OUT_WELDIST, paste0(code, "_welfare_dist.png"))
-      if (OVERWRITE_EXISTING || !file.exists(out_path)) {
-        p_welf <- plot_welfare_dist(svy, outcome = "welfare",
-                                    poverty_lines = welfare_poverty_lines())
-        save_gg(p_welf, out_path, width = 8, height = 5)
-      }
-    }, error = function(e) message("  welfare dist failed: ", conditionMessage(e)))
-  }
 
   # ------ Weighted summary stats --------------------------------------------
   tryCatch({

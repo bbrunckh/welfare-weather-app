@@ -372,19 +372,10 @@ test_that("selected eligibility omits inclusion and exclusion errors", {
 })
 
 test_that("new export keys return valid figures or data frames", {
-  # 1. climate_adverse_return_periods
-  tbl <- data.frame(
-    scenario = "SSP2 / 2030", Estimate = "Central (P50)",
-    rp_name = "1:1", value = 10, is_historical = FALSE, stringsAsFactors = FALSE
-  )
-  dot_data <- wiseapp:::step2_adverse_dot_data(tbl, "mean")
-  p_dot <- wiseapp:::plot_step2_adverse_dot(dot_data)
-  expect_s3_class(p_dot, "ggplot")
-
-  # 2. policy_distributional_incidence
+  # 1. policy_distributional_incidence
   inc <- data.frame(decile = 1:10, effect = rep(1, 10))
-  p_inc <- wiseapp:::plot_incidence_by_decile(inc)
-  expect_s3_class(p_inc, "ggplot")
+  p_inc <- wiseapp:::echart_incidence_by_decile(inc)
+  expect_s3_class(p_inc, "echarts4r")
 
   df1 <- data.frame(welfare = 1:5, x = 1:5)
   df2 <- data.frame(welfare = 2:6, x = 2:6)

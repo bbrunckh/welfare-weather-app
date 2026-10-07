@@ -183,43 +183,6 @@ test_that("historical cell joins retain NA-key rows and exact sample dates", {
   expect_s3_class(out$timestamp, "Date")
 })
 
-# ============================================================================ #
-# plot_weather_dist                                                            #
-# ============================================================================ #
-
-test_that("plot_weather_dist returns NULL for NULL df", {
-  expect_null(plot_weather_dist(NULL, "tx", "Temp", "Continuous"))
-})
-
-test_that("plot_weather_dist returns NULL when hv not in df", {
-  df <- data.frame(countryyear = "A, 2018", other = 1:5)
-  expect_null(plot_weather_dist(df, "tx", "Temp", "Continuous"))
-})
-
-test_that("plot_weather_dist returns NULL when hv is NA", {
-  df <- data.frame(countryyear = "A, 2018", tx = 1:5)
-  expect_null(plot_weather_dist(df, NA_character_, "Temp", "Continuous"))
-})
-
-test_that("plot_weather_dist returns ggplot for continuous variable", {
-  skip_if_not_installed("ggplot2")
-  df <- merge_survey_weather(make_survey(), make_weather()) |>
-    dplyr::mutate(countryyear = paste0("TST, ", year))
-  p <- plot_weather_dist(df, "tx", "Max temp", "Continuous")
-  expect_s3_class(p, "ggplot")
-})
-
-test_that("plot_weather_dist returns ggplot for binned variable", {
-  skip_if_not_installed("ggplot2")
-  df <- merge_survey_weather(make_survey(), make_weather()) |>
-    dplyr::mutate(
-      countryyear = paste0("TST, ", year),
-      tx = cut(tx, breaks = c(-Inf, 28, Inf), include.lowest = TRUE)
-    )
-  p <- plot_weather_dist(df, "tx", "Max temp", "Binned")
-  expect_s3_class(p, "ggplot")
-})
-
 test_that("interactive binned weather distribution keeps labels and tooltip visible", {
   skip_if_not_installed("echarts4r")
   df <- data.frame(
@@ -295,81 +258,6 @@ test_that("historical binned counts use the survey's finite outer labels", {
 test_that("weather wave palette follows the app blue and teal series", {
   pal <- wiseapp:::.wave_palette(c("A, 2020", "A, 2021", "B, 2020"))
   expect_equal(unname(pal), c("#0071BC", "#00A6C7", "#8667B3"))
-})
-
-# ============================================================================ #
-# plot_binscatter                                                              #
-# ============================================================================ #
-
-test_that("plot_binscatter returns NULL for NULL df", {
-  expect_null(plot_binscatter(NULL, "tx", "Temp", "welfare", "Welfare"))
-})
-
-test_that("plot_binscatter returns NULL when hv is NA", {
-  df <- merge_survey_weather(make_survey(), make_weather())
-  expect_null(plot_binscatter(df, NA_character_, "Temp", "welfare", "Welfare"))
-})
-
-test_that("plot_binscatter returns NULL when hv not in df", {
-  df <- merge_survey_weather(make_survey(), make_weather())
-  expect_null(plot_binscatter(df, "missing_var", "Temp", "welfare", "Welfare"))
-})
-
-test_that("plot_binscatter returns NULL when y_var not in df", {
-  df <- merge_survey_weather(make_survey(), make_weather())
-  expect_null(plot_binscatter(df, "tx", "Temp", "missing_outcome", "Outcome"))
-})
-
-test_that("plot_binscatter returns NULL when no finite data remain", {
-  df <- merge_survey_weather(make_survey(), make_weather())
-  df$welfare <- NA_real_
-  expect_null(plot_binscatter(df, "tx", "Temp", "welfare", "Welfare"))
-})
-
-test_that("plot_binscatter returns ggplot for continuous outcome", {
-  skip_if_not_installed("ggplot2")
-  df <- merge_survey_weather(make_survey(), make_weather())
-  p  <- plot_binscatter(df, "tx", "Max temp", "welfare", "Welfare (PPP)")
-  expect_s3_class(p, "ggplot")
-})
-
-test_that("plot_binscatter returns ggplot for binary outcome", {
-  skip_if_not_installed("ggplot2")
-  df <- merge_survey_weather(make_survey(), make_weather()) |>
-    dplyr::mutate(poor = as.integer(welfare < 3))
-  p  <- plot_binscatter(df, "tx", "Max temp", "poor", "Poor (0/1)")
-  expect_s3_class(p, "ggplot")
-})
-
-test_that("plot_binscatter handles binned weather with continuous outcome", {
-  skip_if_not_installed("ggplot2")
-  df <- merge_survey_weather(make_survey(), make_weather()) |>
-    dplyr::mutate(
-      tx = cut(tx, breaks = c(-Inf, 28, Inf), include.lowest = TRUE)
-    )
-  p <- plot_binscatter(df, "tx", "Max temp", "welfare", "Welfare")
-  expect_s3_class(p, "ggplot")
-})
-
-test_that("plot_binscatter handles binned weather with binary outcome", {
-  skip_if_not_installed("ggplot2")
-  df <- merge_survey_weather(make_survey(), make_weather()) |>
-    dplyr::mutate(
-      tx = cut(tx, breaks = c(-Inf, 28, Inf), include.lowest = TRUE),
-      poor = as.integer(welfare < 3)
-    )
-  p <- plot_binscatter(df, "tx", "Max temp", "poor", "Poor")
-  expect_s3_class(p, "ggplot")
-})
-
-test_that("plot_binscatter samples large tibbles with integer row indices", {
-  skip_if_not_installed("ggplot2")
-  df <- tibble::tibble(
-    tx = rep(seq(20, 40, length.out = 100), 40),
-    welfare = rep(c(1, 2, 3, 4), 1000)
-  )
-  p <- plot_binscatter(df, "tx", "Max temp", "welfare", "Welfare")
-  expect_s3_class(p, "ggplot")
 })
 
 # ============================================================================ #

@@ -5,7 +5,6 @@
 #
 # Outputs:
 #   OUT_DIR/weather_stats/weather_stats.csv
-#   OUT_DIR/weather_stats/weather_distributions/{CODE}_{BASEVAR}_dist.png
 #
 # All user inputs are in SECTION 1. 
 #
@@ -71,9 +70,8 @@ OVERWRITE_EXISTING <- FALSE
 
 # Output directories
 OUT_WEATHER  <- file.path(OUT_DIR, "weather_stats")
-OUT_WX_DIST  <- file.path(OUT_WEATHER, "weather_distributions")
 
-for (d in c(OUT_WEATHER, OUT_WX_DIST))
+for (d in c(OUT_WEATHER))
   dir.create(d, showWarnings = FALSE, recursive = TRUE)
 
 # Connection
@@ -195,7 +193,6 @@ for (code in COUNTRIES_02) {
   dates <- extract_survey_dates(svy_base)
 
   # Accumulate plot data across specs: named list keyed by base_var
-  plot_data_by_var <- list()
   country_wx_stats <- list()
 
   # -- Loop over weather profiles ---------------------------------------------
@@ -275,29 +272,6 @@ for (code in COUNTRIES_02) {
       NULL
     })
 
-    # -- Accumulate plot data per base variable --------------------------------
-    for (hv in vars_wx) {
-      sw_row      <- selected_weather[selected_weather$name == hv, ][1L, ]
-      ref_period  <- paste0(sw_row$ref_start, "to", sw_row$ref_end, "m")
-      transf      <- sw_row$transformation %||% "None"
-      label       <- sw_row$label %||% hv
-      base_var    <- gsub("_.*", "", hv)  # strip ref_period/transf suffix; no base_var col in selected_weather
-
-      if (is.null(plot_data_by_var[[base_var]]))
-        plot_data_by_var[[base_var]] <- list(label = label, specs = list())
-
-      plot_data_by_var[[base_var]]$specs[[wx_name]] <- list(
-        hv         = hv,
-        ref_period = ref_period,
-        transf     = transf,
-        df_survey  = df_wx[is.finite(df_wx[[hv]]),
-                           c(hv, "countryyear"), drop = FALSE],
-        df_ref     = if (!is.null(df_ref) && hv %in% names(df_ref))
-                       df_ref[is.finite(df_ref[[hv]]), hv, drop = FALSE]
-                     else NULL
-      )
-    }
-
     # -- Weather summary stats ------------------------------------------------
     tryCatch({
       if (length(vars_wx) > 0) {
@@ -321,109 +295,6 @@ for (code in COUNTRIES_02) {
     gc(verbose = FALSE)
   }
 
-  # -- Faceted distribution plots (one PNG per base variable) ----------------
-  # Columns = ref_period, rows = transformation.
-  ref_label_str <- paste0("Climate ref. ", CLIMATE_REF_YEARS[1], "-", CLIMATE_REF_YEARS[2])
-
-  for (base_var in names(plot_data_by_var)) {
-    tryCatch({
-      out_path <- file.path(OUT_WX_DIST, paste0(code, "_", base_var, "_dist.png"))
-      if (!OVERWRITE_EXISTING && file.exists(out_path)) next
-
-      specs     <- plot_data_by_var[[base_var]]$specs
-      var_label <- plot_data_by_var[[base_var]]$label
-
-      # Build combined long data frame for survey rows
-      survey_rows <- dplyr::bind_rows(lapply(specs, function(s) {
-        df <- s$df_survey
-        df$value      <- df[[s$hv]]
-        df$ref_period <- s$ref_period
-        df$transf     <- s$transf
-        df[, c("countryyear", "value", "ref_period", "transf")]
-      }))
-
-      # Build combined long data frame for reference rows
-      ref_rows <- dplyr::bind_rows(lapply(specs, function(s) {
-        if (is.null(s$df_ref)) return(NULL)
-        data.frame(
-          countryyear = ref_label_str,
-          value       = s$df_ref[[s$hv]],
-          ref_period  = s$ref_period,
-          transf      = s$transf,
-          stringsAsFactors = FALSE
-        )
-      }))
-
-      all_rows <- rbind(survey_rows, ref_rows)
-      if (nrow(all_rows) == 0) next
-
-      # Factor so reference ridge plots at the bottom within each facet
-      survey_levels <- sort(unique(survey_rows$countryyear))
-      all_rows$countryyear <- factor(
-        all_rows$countryyear,
-        levels = c(ref_label_str, survey_levels)
-      )
-      all_rows$series <- paste(
-        all_rows$ref_period, all_rows$transf, all_rows$countryyear,
-        sep = " | "
-      )
-
-      n_survey      <- length(survey_levels)
-      survey_cols   <- scales::hue_pal()(n_survey)
-      names(survey_cols) <- survey_levels
-      all_cols <- c(setNames("#AAAAAA", ref_label_str), survey_cols)
-
-      # Facet labels: ref_period as columns (sorted), transf as rows
-      ref_periods <- intersect(c("1to1m", "1to3m", "1to6m", "1to12m"),
-                               unique(all_rows$ref_period))
-      transfs     <- sort(unique(as.character(all_rows$transf)))
-      all_rows$ref_period <- factor(all_rows$ref_period, levels = ref_periods)
-      all_rows$transf     <- factor(all_rows$transf,     levels = transfs)
-      n_col <- length(ref_periods)
-      n_row <- length(transfs)
-
-      rd <- build_ridge_distribution_data(
-        all_rows,
-        x_var      = "value",
-        group_var  = "series",
-        fill_var   = "countryyear",
-        ridge_var  = "countryyear",
-        n_bins     = 256L,
-        n_grid     = 256L
-      )
-      if (is.null(rd)) next
-
-      p <- ggplot2::ggplot(
-        rd$data,
-        ggplot2::aes(x = .data$x, y = .data$y,
-                     group = .data$group, fill = .data$fill)
-      ) +
-        ridge_geometry_layers(scale = 1.5, alpha = 0.7, linewidth = 0.3) +
-        ggplot2::scale_y_continuous(
-          breaks = seq_along(rd$ridges), labels = rd$ridges,
-          expand = ggplot2::expansion(mult = c(0.02, 0.12))
-        ) +
-        ggplot2::scale_fill_manual(values = all_cols) +
-        ggplot2::facet_grid(
-          rows = ggplot2::vars(ref_period),
-          cols = ggplot2::vars(transf),
-          scales = "free_x"
-        ) +
-        ggplot2::theme_minimal(base_size = 10) +
-        ggplot2::labs(
-          title = var_label,
-          x = var_label, y = "", fill = ""
-        ) +
-        ggplot2::theme(legend.position = "bottom",
-                       strip.text = ggplot2::element_text(size = 8))
-
-      save_gg(p, out_path,
-              width  = 3 * n_row + 2,
-              height = 2.5 * n_col + 1.5)
-      cat(sprintf("  Plot saved: %s\n", basename(out_path)))
-    }, error = function(e) message("  dist plot failed [", base_var, "]: ", conditionMessage(e)))
-  }
-
   # -- Flush per-country stats to disk -----------------------------------------
   if (length(country_wx_stats) > 0L) {
     country_df <- dplyr::bind_rows(country_wx_stats)
@@ -432,7 +303,7 @@ for (code in COUNTRIES_02) {
   }
 
   # -- Clear country-level objects from memory --------------------------------
-  rm(svy_base, dates, plot_data_by_var, country_wx_stats, ss, years_by_code)
+  rm(svy_base, dates, country_wx_stats, ss, years_by_code)
   gc(verbose = FALSE)
 }
 

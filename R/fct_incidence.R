@@ -160,43 +160,15 @@ step3_incidence_by_decile <- function(compact, so = NULL, bases = .decomp_basis_
   dplyr::bind_rows(rows)
 }
 
-plot_incidence_by_decile <- function(tbl, y_label = "Household-level simulated welfare effect") {
-  if (is.null(tbl) || !nrow(tbl)) {
-    return(blank_plot("Distributional incidence is unavailable."))
-  }
-  if (!"scenario" %in% names(tbl)) tbl$scenario <- "Effect"
-  multi_basis <- "basis" %in% names(tbl) && length(unique(tbl$basis)) > 1L
-  if (multi_basis) {
-    tbl$basis <- factor(tbl$basis, levels = unname(.decomp_basis_choices),
-      labels = names(.decomp_basis_choices))
-  }
-  p <- ggplot2::ggplot(tbl, ggplot2::aes(
-    x = factor(.data$decile), y = .data$effect,
-    fill = .data$scenario
-  )) +
-    ggplot2::geom_hline(yintercept = 0, linetype = "dashed", colour = .wise_zero) +
-    ggplot2::geom_col(position = ggplot2::position_dodge(width = 0.75), width = 0.65) +
-    wise_scale_fill_cat(name = NULL) +
-    ggplot2::labs(
-      x = "Fixed observed baseline welfare decile (1 = poorest)",
-      y = y_label,
-      caption = "Deciles use weighted observed baseline welfare and are not re-ranked under simulated conditions."
-    ) +
-    theme_wise(base_size = 13) +
-    ggplot2::theme(legend.position = "bottom")
-  if (multi_basis) p <- p + ggplot2::facet_wrap(ggplot2::vars(.data$basis))
-  p
-}
 
-# Interactive (echarts4r) counterpart of plot_incidence_by_decile().
-# Same statistics as the ggplot builder: weighted mean effect per fixed
+# Interactive (echarts4r) renderer for the precomputed incidence summary.
+# Same statistics: weighted mean effect per fixed
 # baseline decile (already precomputed in `tbl`); echarts only draws the
 # precomputed values (guidelines §7).
 #
 # Design notes: grouped vertical bars per scenario, Okabe-Ito palette via
-# wise_echart_theme(), axis-trigger tooltip, legend bottom-left (the ggplot
-# showed one), dashed zero reference line. The ggplot caption is dropped -
-# the module UI carries it as static text.
+# wise_echart_theme(), axis-trigger tooltip, legend bottom-left, and dashed
+# zero reference line. The module UI carries the chart caption as static text.
 echart_incidence_by_decile <- function(tbl,
                                        y_label = "Household-level simulated welfare effect",
                                        height = "420px") {
@@ -274,7 +246,7 @@ echart_incidence_by_decile <- function(tbl,
   )
   e$x$opts$grid <- list(containLabel = TRUE, left = 8, right = 14, top = 30, bottom = 46)
   e$x$opts$color <- unname(.wise_cat)
-  # Dashed zero reference line (geom_hline yintercept = 0, .wise_zero).
+  # Dashed zero reference line.
   if (length(e$x$opts$series)) {
     e$x$opts$series[[1L]]$markLine <- list(
       silent = TRUE,

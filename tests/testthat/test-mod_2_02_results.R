@@ -901,103 +901,6 @@ test_that("adverse plot uses the selected climate-model spread", {
   dot <- step2_adverse_dot_data(threshold_tbl, method = "mean")
   expect_equal(dot$intermod_lo[!dot$is_historical], c(4, 3))
   expect_equal(dot$intermod_hi[!dot$is_historical], c(6, 7))
-
-  plot <- plot_step2_adverse_dot(dot)
-  expect_equal(plot$data$intermod_lo[!plot$data$is_historical], c(4, 3))
-  expect_equal(plot$data$intermod_hi[!plot$data$is_historical], c(6, 7))
-})
-
-test_that("adverse plot labels scenarios directly on one shared x-axis", {
-  threshold_tbl <- tibble::tibble(
-    scenario = c(rep("SSP2-4.5 / 2030-2040", 6L),
-                 rep("SSP2-4.5 / 2050-2060", 6L)),
-    Estimate = rep(c("Central (P50)", "Central (P50)",
-                     "Ensemble min", "Ensemble min",
-                     "Ensemble max", "Ensemble max"), 2L),
-    rp_name = rep(c("1:1", "1:5", "1:1", "1:5", "1:1", "1:5"), 2L),
-    value = rep(c(5, 5, 4, 3, 6, 7), 2L),
-    is_historical = FALSE,
-    n_obs = 30L
-  )
-  threshold_tbl <- dplyr::bind_rows(threshold_tbl, tibble::tibble(
-    scenario = "Historical", Estimate = "Single historical estimate",
-    rp_name = "1:1", value = 0, is_historical = TRUE, n_obs = 30L
-  ))
-
-  dot <- step2_adverse_dot_data(threshold_tbl, method = "mean")
-  plot <- plot_step2_adverse_dot(dot)
-  colour_scale <- plot$scales$get_scales("colour")
-
-  # Design D: the colour legend is replaced by direct scenario labels on the
-  # top row, so the colour scale carries no guide.
-  expect_identical(colour_scale$guide, "none")
-  # Multiple future periods share one x-axis: no facet is added, each period
-  # variant is its own labelled row instead.
-  expect_true(inherits(plot$facet, "FacetNull"))
-  # One bold text layer per scenario on the Expected row.
-  text_layers <- Filter(function(l) inherits(l$geom, "GeomText"), plot$layers)
-  expect_equal(length(text_layers), 1L)
-  expect_setequal(text_layers[[1L]]$data$scenario_key,
-                  c("SSP2-4.5 / 2030-2040", "SSP2-4.5 / 2050-2060", "Historical"))
-})
-
-test_that("adverse dot plot offsets scenario dumbbells vertically", {
-  # Two future scenarios at the same return-period rows: without vertical
-  # dodging their dumbbells overlap and only one is readable.
-  threshold_tbl <- tibble::tibble(
-    scenario = rep(c("SSP2-4.5 / 2030-2040", "SSP5-8.5 / 2030-2040"), each = 4L),
-    Estimate = rep(c("Central (P50)", "Central (P50)",
-                     "Ensemble min", "Ensemble max"), 2L),
-    rp_name = rep(c("1:1", "1:5", "1:1", "1:5"), 2L),
-    value = rep(c(4.6, 4.4, 3.8, 5.0), 2L),
-    is_historical = FALSE,
-    n_obs = 30L
-  )
-  threshold_tbl <- dplyr::bind_rows(threshold_tbl, tibble::tibble(
-    scenario = "Historical", Estimate = "Single historical estimate",
-    rp_name = "1:1", value = 0, is_historical = TRUE, n_obs = 30L
-  ))
-  dot <- step2_adverse_dot_data(threshold_tbl, method = "mean")
-  plot <- plot_step2_adverse_dot(dot)
-
-  # The y aesthetic must be scenario-dependent within a return period, so
-  # dumbbells at the same rp_label get distinct vertical offsets.
-  seg_idx <- which(vapply(plot$layers, function(l) inherits(l$geom, "GeomSegment"),
-                          logical(1)))[1]
-  seg <- ggplot2::layer_data(plot, seg_idx)
-  expect_equal(nrow(seg), nrow(plot$data))
-
-  # Match rendered segment rows back to data rows via the rp_label y position
-  # pattern: currently both scenarios at the same rp_label share one y, so
-  # y values repeat across scenarios. With vertical dodging, scenarios at the
-  # same rp_label must have different rendered y values.
-  y_expected <- as.integer(plot$data$rp_label)
-  y1 <- seg$y[plot$data$scenario_key == "SSP2-4.5 / 2030-2040"]
-  y2 <- seg$y[plot$data$scenario_key == "SSP5-8.5 / 2030-2040"]
-  expect_false(isTRUE(all.equal(y1, y2)))
-})
-
-test_that("exceedance plot omits unsupported return-period warning annotation", {
-  curves <- tibble::tibble(
-    scenario = rep("SSP2-4.5 / 2030-2040", 30L),
-    model_id = rep(c("m1", "m2"), each = 15L),
-    rank = rep(seq_len(15L), 2L),
-    welfare_val = seq_len(30L),
-    coef_sd = 0,
-    exceed_prob = rep((seq_len(15L) - 0.5) / 30, 2L),
-    is_historical = FALSE
-  )
-
-  plot <- enhance_exceedance(
-    curves, x_label = "Outcome", n_sim_years = 30L,
-    logit_x = TRUE, band_q = NULL, ensemble_band_q = c(lo = 0, hi = 1)
-  )
-  labels <- vapply(plot$layers, function(layer) {
-    if (!inherits(layer$geom, "GeomText")) return("")
-    as.character(layer$stat_params$label %||% "")
-  }, character(1L))
-  expect_false(any(grepl("unreliable", labels, fixed = TRUE)))
-  expect_false(any(grepl("1:50", labels, fixed = TRUE)))
 })
 
 # Batch 2 UI migration: DT -> reactable, ggplot -> echarts4r (guidelines §6/§7)
@@ -1173,23 +1076,6 @@ test_that("echart_variance_contribution draws one bar series per source", {
   )
 })
 
-test_that("echart_incidence_by_decile draws scenario bars with a zero line", {
-  inc <- data.frame(
-    decile = rep(1:10, 2),
-    scenario = rep(c("Historical", "SSP2 / 2030"), each = 10),
-    effect = rnorm(20)
-  )
-  ch <- echart_incidence_by_decile(inc)
-  expect_s3_class(ch, "echarts4r")
-  expect_length(ch$x$opts$series, 2L)
-  ml <- ch$x$opts$series[[1]]$markLine
-  expect_equal(ml$data[[1]]$yAxis, 0)
-  blank <- echart_incidence_by_decile(NULL)
-  expect_match(blank$x$opts$title[[1]]$text, "Distributional incidence is unavailable.",
-    fixed = TRUE
-  )
-})
-
 test_that("results module renders echarts charts and a reactable threshold table", {
   skip_if_not_installed("shiny")
   testServer(
@@ -1207,7 +1093,6 @@ test_that("results module renders echarts charts and a reactable threshold table
       # Zero-arg closures return echarts widgets (render + export share them).
       expect_s3_class(pointrange_chart(), "echarts4r")
       expect_s3_class(annual_distribution_chart(), "echarts4r")
-      expect_s3_class(incidence_chart(), "echarts4r")
       expect_s3_class(adverse_dot_chart(), "echarts4r")
       expect_s3_class(exceedance_chart(), "echarts4r")
       expect_s3_class(uncertainty_chart(), "echarts4r")
