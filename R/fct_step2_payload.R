@@ -18,7 +18,7 @@ STEP2_WEATHER_KEY_COLUMNS <- c(
 # rolling windows, transformations, rounding, and binning.  It is deliberately
 # separate from the run-scoped reference store below: prepared weather is safe
 # to reuse across model runs, while references are owned by one published run.
-STEP2_PREPARED_WEATHER_CACHE_VERSION <- "v1"
+STEP2_PREPARED_WEATHER_CACHE_VERSION <- "v2"
 
 .step2_prepared_weather_cache_root <- function(root = NULL) {
   root <- root %||% Sys.getenv("WISEAPP_PREPARED_WEATHER_CACHE_DIR")

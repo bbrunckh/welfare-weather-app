@@ -576,7 +576,7 @@ test_that("prepared weather cache replays a complete cold run", {
     warm$new_scenarios[[1L]]$pipelines$ensemble_hi$weather_raw,
     cold$new_scenarios[[1L]]$pipelines$ensemble_hi$weather_raw
   )
-  expect_length(list.dirs(file.path(root, "prepared-weather", "v1"),
+  expect_length(list.dirs(file.path(root, "prepared-weather", STEP2_PREPARED_WEATHER_CACHE_VERSION),
                           recursive = FALSE), 1L)
 })
 
@@ -606,7 +606,7 @@ test_that("prepared weather cache signature invalidates changed dates", {
   run(input$sim_dates)
   run(c("2020-02-01", "2020-12-31"))
   expect_identical(calls, 2L)
-  expect_length(list.dirs(file.path(root, "prepared-weather", "v1"),
+  expect_length(list.dirs(file.path(root, "prepared-weather", STEP2_PREPARED_WEATHER_CACHE_VERSION),
                           recursive = FALSE), 2L)
 })
 
