@@ -72,6 +72,30 @@
   min-width: 1.35em;
 }
 
+/* ---- Skip link (R2-A11Y-05, WCAG 2.4.1) ----------------------------------
+   Off-screen until focused, then shown over the navbar's top-left corner. */
+.skip-link {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2000;
+  padding: 0.5rem 0.9rem;
+  background: #ffffff;
+  color: var(--bs-primary, #0071bc);
+  font-weight: 600;
+  transform: translateY(-120%);
+}
+
+.skip-link:focus {
+  transform: none;
+  outline: 2px solid var(--bs-primary, #0071bc);
+  outline-offset: -2px;
+}
+
+#main-content:focus {
+  outline: none;
+}
+
 /* ---- Focus ring (R2-A11Y-02, WCAG 1.4.11) --------------------------------
    The theme (app_ui.R) makes the input/nav/accordion focus ring a solid 2px
    brand blue. Buttons build theirs from a per-variant colour at 50% alpha,
@@ -484,7 +508,7 @@ body .btn {
   margin-bottom: 0.75rem;
 }
 
-.empty-state h5 {
+.empty-state .h5 {
   color: var(--bs-dark);
   margin-bottom: 0.35rem;
 }
@@ -507,7 +531,7 @@ body .btn {
   margin-bottom: 0.35rem;
 }
 
-.overview-empty-state h5 {
+.overview-empty-state .h5 {
   font-size: 1rem;
   margin-bottom: 0.2rem;
 }
@@ -925,7 +949,7 @@ body.bslib-page-navbar:has(> .container-fluid > .tab-content > .tab-pane.active 
   margin-bottom: 0;
 }
 
-.step-card-title h5 {
+.step-card-title .h5 {
   margin-bottom: 0;
 }
 

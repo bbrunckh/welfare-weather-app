@@ -16,7 +16,7 @@ mod_2_simulation_ui <- function(id) {
       width = 360,
       mod_2_01_weathersim_ui(ns("weathersim"))
     ),
-    h4("What welfare is expected given historical weather conditions? In future climate scenarios?",
+    h1("What welfare is expected given historical weather conditions? In future climate scenarios?",
        class = "step-question"),
     tabsetPanel(
       id = ns("step2_output_tabs"),
@@ -26,7 +26,7 @@ mod_2_simulation_ui <- function(id) {
         div(
           class = "empty-state overview-empty-state",
           icon("cloud-sun-rain"),
-          h5("No simulations yet"),
+          h2(class = "h5", "No simulations yet"),
           p(paste(
             "Configure climate scenarios in the sidebar, then click",
             "'Run simulation'. Results will appear here as new tabs."

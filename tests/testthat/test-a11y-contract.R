@@ -199,3 +199,47 @@ test_that("CR-A11Y-04: social protection select and slider have hidden labels", 
   expect_match(code, 'visually-hidden", "Targeting"', fixed = TRUE)
   expect_match(code, 'visually-hidden", "Transfers per year"', fixed = TRUE)
 })
+
+test_that("R2-A11Y-05: skip link, main landmark and heading levels", {
+  skip_if_not_installed("brand.yml")
+  local_mocked_bindings(get_golem_version = function(...) "0.0.0",
+                        .package = "golem")
+  r <- htmltools::renderTags(app_ui(NULL))
+  html <- as.character(r$html)
+  # The skip link comes before the navbar and targets the main landmark.
+  expect_lt(regexpr('class="skip-link" href="#main-content"', html, fixed = TRUE),
+            regexpr("<nav", html, fixed = TRUE))
+  expect_match(html, 'id="main-content" role="main" tabindex="-1"',
+               fixed = TRUE)
+  expect_identical(lengths(regmatches(html, gregexpr('role="main"', html))),
+                   1L)
+  # Theme and component dependencies survive the tagQuery rewrite.
+  deps <- vapply(r$dependencies, `[[`, "", "name")
+  expect_true(all(c("bootstrap", "bslib-component-js") %in% deps))
+  # Headings no longer jump from h1 to h4/h5 on the step pages.
+  expect_false(grepl("<h5", html, fixed = TRUE))
+  expect_false(grepl('<h4 class="step-question"', html, fixed = TRUE))
+  expect_match(html, '<h1 class="step-question"', fixed = TRUE)
+  expect_match(as.character(welfare_equation_ui()), '<h2 class="h5"',
+               fixed = TRUE)
+})
+
+test_that("R2-A11Y-05: connection status is a polite live region", {
+  src <- file.path("..", "..", "R", "mod_0_overview.R")
+  skip_if_not(file.exists(src), "R sources not found")
+  code <- paste(readLines(src, warn = FALSE), collapse = "\n")
+  hits <- gregexpr(
+    'uiOutput\\(ns\\("connection_status_ui"\\),\\s*role = "status", `aria-live` = "polite"\\)',
+    code
+  )[[1L]]
+  expect_equal(sum(hits > 0), 2L)
+})
+
+test_that("R2-A11Y-05: info icons and CSV buttons have specific names", {
+  pop <- as.character(info_popover("Body", title = "Aggregation"))
+  expect_match(pop, 'aria-label="More information: Aggregation"', fixed = TRUE)
+  expect_match(as.character(info_popover("Body")),
+               'aria-label="More information"', fixed = TRUE)
+  btn <- as.character(wise_reactable_csv_button("t1", "step1_coef_table"))
+  expect_match(btn, 'aria-label="Download CSV: step1 coef table"', fixed = TRUE)
+})

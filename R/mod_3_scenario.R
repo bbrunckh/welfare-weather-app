@@ -54,7 +54,7 @@ mod_3_scenario_ui <- function(id) {
       uiOutput(ns("run3_prereq_ui")),
       uiOutput(ns("run_policy_sim_ui"))
     ),
-    h4("How could policy and structural adjustments mitigate the welfare impacts of weather?",
+    h1("How could policy and structural adjustments mitigate the welfare impacts of weather?",
       class = "step-question"
     ),
     tabsetPanel(
@@ -65,7 +65,7 @@ mod_3_scenario_ui <- function(id) {
         div(
           class = "empty-state overview-empty-state",
           icon("scale-balanced"),
-          h5("No policy simulations yet"),
+          h2(class = "h5", "No policy simulations yet"),
           p(paste(
             "Configure policy scenarios in the sidebar, then click",
             "'Run simulation'. Results will appear here as new tabs."
