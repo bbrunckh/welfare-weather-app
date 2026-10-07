@@ -402,7 +402,7 @@ step2_weather_store_acquire <- function(stores) {
   }
   lease_id <- paste0("lease-", substr(digest::digest(list(
     Sys.time(), keys,
-    runif(1L)
+    basename(tempfile())
   )), 1L, 20L))
   lease <- list(
     schema = 1L, kind = "step2-weather-store-lease",

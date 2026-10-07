@@ -178,3 +178,34 @@ test_that("live_run lifecycle: submit, partials, adoption, cancel", {
     expect_identical(run_status(), "cancelled")
   })
 })
+
+test_that("future periods cannot start before the SSP projections (R2-BUG-23)", {
+  expect_identical(.step2_valid_future_period(c(2025, 2035)), c(2025L, 2035L))
+  expect_null(.step2_valid_future_period(c(2010, 2030)))
+  expect_null(.step2_valid_future_period(c(2015, 2015)))
+  expect_identical(.step2_valid_future_period(c(2015, 2020)), c(2015L, 2020L))
+
+  ui <- as.character(mod_2_01_weathersim_ui("sim"))
+  mins <- regmatches(ui, gregexpr('id="sim-fut_period_[0-9]"[^>]*data-min="[0-9]+"', ui))[[1]]
+  expect_length(mins, 3L)
+  expect_true(all(grepl('data-min="2015"', mins, fixed = TRUE)))
+
+  survey <- data.frame(hhid = 1:2, code = "AAA", year = 2020L,
+                       survname = "SRV", loc_id = "L1", int_month = 1:2,
+                       welfare = 1:2, temp = 3:4)
+  testServer(mod_2_01_weathersim_server, args = list(
+    id = "sim", connection_params = reactiveVal(list(type = "local", path = tempdir())),
+    selected_outcome = reactiveVal(data.frame(name = "welfare")),
+    selected_weather = reactiveVal(data.frame(name = "temp")),
+    selected_surveys = reactiveVal(data.frame(code = "AAA", year = 2020L,
+      survname = "SRV", source = "src", economy = "A")),
+    survey_weather = reactiveVal(survey),
+    model_fit = reactiveVal(list(engine = "fixest", .sig = list(fit = 1L)))
+  ), {
+    session$setInputs(hist_years = c(1991, 2020), climate = "ssp2_4_5",
+      fut_period_1 = c(2010, 2030), fut_period_2 = c(2040, 2050),
+      fut_period_3 = c(2015, 2015))
+    expect_identical(future_periods(), list(c(2040, 2050)))
+    expect_match(as.character(output$fut_years_warning$html), "starts before 2015")
+  })
+})

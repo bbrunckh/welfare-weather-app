@@ -122,7 +122,8 @@
   }
   # R2-SEC-01: a UI connection carries the user's own credentials to the
   # local daemon (guidelines section 0; .wise_step2_async_launch() only starts
-  # local daemons, never url= ones). The worker never fills a missing UI
+  # local daemons, never url= ones, and dispatch re-checks this with
+  # .wise_async_require_local_daemon()). The worker never fills a missing UI
   # field from its environment (.connection_field()).
   if (identical(params$origin, "ui")) {
     return(params)
@@ -143,7 +144,7 @@
 .wise_step2_async_id <- function() {
   paste0(
     "step2-", format(Sys.time(), "%Y%m%dT%H%M%OS3", tz = "UTC"), "-",
-    substr(digest::digest(list(Sys.getpid(), Sys.time(), runif(1L))), 1L, 16L)
+    substr(digest::digest(list(Sys.getpid(), Sys.time(), basename(tempfile()))), 1L, 16L)
   )
 }
 
@@ -239,14 +240,16 @@
         run_id = run_id,
         weather_storage = weather_storage,
         weather_collect = weather_collect,
-        weather_threads = weather_threads
+        weather_threads = weather_threads,
+        clear_credentials = clear_credentials
     )
   })
 
   .wise_step2_async_ensure_daemon()
   submit_started <- proc.time()[["elapsed"]]
   submitted_at_epoch <- as.numeric(Sys.time())
-  mirai_job <- tryCatch(
+  mirai_job <- tryCatch({
+    .wise_async_require_local_daemon(job$snapshot$input$cp)
     mirai::try_mirai(
       worker_expr,
       .timeout = .wise_step2_async_timeout_ms("step2"),
@@ -267,10 +270,10 @@
       run_id = job$run_id,
       weather_storage = job$weather_storage,
       weather_collect = job$weather_collect,
-      weather_threads = job$weather_threads
-    ),
-    error = function(e) e
-  )
+      weather_threads = job$weather_threads,
+      clear_credentials = .wise_async_clears_credentials(job$snapshot$input$cp)
+    )
+  }, error = function(e) e)
   if (inherits(mirai_job, "error")) {
     state$active <- NULL
     .wise_step2_async_settle(job, error = mirai_job)
@@ -638,6 +641,33 @@
   is.list(status) && isTRUE(status$connections >= 1L)
 }
 
+# TRUE when every daemon of the shared pool listens on a local transport
+# (ipc, abstract socket or in-process sync mode). tcp/tls daemons may run on
+# another host.
+.wise_async_daemons_local <- function() {
+  url <- tryCatch(mirai::status(.compute = "default")$daemons, error = function(e) NULL)
+  is.character(url) && length(url) > 0L &&
+    all(grepl("^(ipc|abstract|inproc)://", url))
+}
+
+# R2-SEC-01: credentials typed in the UI may only be sent to local daemons
+# (guidelines section 0). Environment connections carry no credentials.
+.wise_async_require_local_daemon <- function(params) {
+  if (is.list(params) && identical(params$origin, "ui") &&
+      !.wise_async_daemons_local()) {
+    stop("The background worker is not local, so the connection credentials ",
+      "entered in the app were not sent to it.", call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
+# R2-SEC-02: a task that carried UI credentials drops them from the shared
+# worker when it ends. In sync mode the task runs in the main process, whose
+# session state must not be cleared.
+.wise_async_clears_credentials <- function(params) {
+  is.list(params) && identical(params$origin, "ui") && !.wise_step2_async_sync()
+}
+
 .wise_step2_async_launch <- function() {
   state <- .wise_step2_async_state
   mirai::daemons(
@@ -859,6 +889,9 @@
   invisible(FALSE)
 }
 
+# Largest result artifact the Shiny process will read back (R2-BUG-23).
+.WISE_STEP2_RESULT_MAX_BYTES <- 2 * 1024^3
+
 .wise_step2_async_read_manifest <- function(manifest, job) {
   if (!is.list(manifest) || !identical(manifest$schema, 2L) ||
       !identical(manifest$job_id, job$id) ||
@@ -871,13 +904,22 @@
   }
   root <- normalizePath(job$artifact_dir, winslash = "/", mustWork = TRUE)
   result_file <- file.path(root, manifest$result_basename)
+  if (is.numeric(manifest$result_bytes) && length(manifest$result_bytes) == 1L &&
+      is.finite(manifest$result_bytes) &&
+      manifest$result_bytes > .WISE_STEP2_RESULT_MAX_BYTES) {
+    stop(sprintf(
+      paste("The Step 2 result (%.1f GB) is larger than the %.0f GB limit.",
+        "Try fewer scenarios or periods."),
+      manifest$result_bytes / 1024^3, .WISE_STEP2_RESULT_MAX_BYTES / 1024^3
+    ), call. = FALSE)
+  }
   if (!identical(manifest$manifest_basename %||% "manifest.rds", "manifest.rds") ||
       !file.exists(file.path(root, "manifest.rds")) ||
       !file.exists(result_file) ||
       !startsWith(normalizePath(result_file, winslash = "/", mustWork = TRUE), paste0(root, "/")) ||
       !is.numeric(manifest$result_bytes) || length(manifest$result_bytes) != 1L ||
       !is.finite(manifest$result_bytes) || manifest$result_bytes < 0 ||
-      manifest$result_bytes > 2 * 1024^3 ||
+      manifest$result_bytes > .WISE_STEP2_RESULT_MAX_BYTES ||
       !identical(as.numeric(file.info(result_file)$size), as.numeric(manifest$result_bytes))) {
     stop("Step 2 result artifact is missing.", call. = FALSE)
   }
@@ -889,14 +931,6 @@
     stop("Step 2 result artifact is invalid.", call. = FALSE)
   }
   result
-}
-
-.wise_step2_async_find_stores <- function(value) {
-  if (is.list(value) && !is.null(value$dir) && !is.null(value$run_id)) {
-    return(list(value))
-  }
-  if (!is.list(value)) return(list())
-  unlist(lapply(value, .wise_step2_async_find_stores), recursive = FALSE)
 }
 
 .wise_step2_async_normalize_input <- function(input) {
@@ -932,7 +966,10 @@ step2_async_worker <- function(snapshot,
                                weather_collect = "fast",
                                weather_threads = "auto",
                                weather_fn = get_weather,
-                               pipeline_fn = run_sim_pipeline) {
+                               pipeline_fn = run_sim_pipeline,
+                               clear_credentials = FALSE) {
+  # R2-SEC-02: drop secrets, tokens and views this task left in the worker.
+  if (isTRUE(clear_credentials)) on.exit(.duck_drop_credentials(), add = TRUE)
   .wise_apply_thread_limits()
   worker_started <- proc.time()[["elapsed"]]
   dir.create(artifact_dir, recursive = TRUE, showWarnings = FALSE)

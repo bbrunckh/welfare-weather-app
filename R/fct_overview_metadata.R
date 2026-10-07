@@ -39,7 +39,10 @@ OVERVIEW_METADATA_REQUIRED_COLUMNS <- list(
 #' @return A named list containing `survey_list`, `variable_list`, `cpi_ppp`,
 #'   and `pov_lines`.
 #' @noRd
-load_overview_metadata <- function(connection_params, force_refresh = FALSE) {
+load_overview_metadata <- function(connection_params, force_refresh = FALSE,
+                                   clear_credentials = FALSE) {
+  # R2-SEC-02: a worker task that carried UI credentials drops them on exit.
+  if (isTRUE(clear_credentials)) on.exit(.duck_drop_credentials(), add = TRUE)
   cache_key <- .overview_metadata_cache_key(connection_params)
   if (!isTRUE(force_refresh)) {
     cached <- .overview_metadata_cache_get(cache_key, connection_params)
@@ -102,20 +105,24 @@ overview_metadata_cache_store <- function(connection_params, value) {
   # Explicit params are allowed only on this local shared pool (guidelines §0).
   submit <- function() {
     if (!isTRUE(is_current())) return(invisible(NULL))
-    task <- tryCatch(mirai::try_mirai({
-      if (!isTRUE(getOption("wiseapp.async.worker_initialized", FALSE))) {
-        if (isTRUE(development_package)) {
-          pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
-            attach_testthat = FALSE, quiet = TRUE)
-        } else {
-          loadNamespace("wiseapp")
+    task <- tryCatch({
+      .wise_async_require_local_daemon(params)
+      mirai::try_mirai({
+        if (!isTRUE(getOption("wiseapp.async.worker_initialized", FALSE))) {
+          if (isTRUE(development_package)) {
+            pkgload::load_all(package_path, export_all = FALSE, helpers = FALSE,
+              attach_testthat = FALSE, quiet = TRUE)
+          } else {
+            loadNamespace("wiseapp")
+          }
+          options(wiseapp.async.worker_initialized = TRUE)
         }
-        options(wiseapp.async.worker_initialized = TRUE)
-      }
-      wiseapp:::load_overview_metadata(params)
-    }, package_path = package_path, development_package = development_package,
-      params = params, .compute = "default",
-      .timeout = .wise_step2_async_timeout_ms("metadata")), error = function(e) e)
+        wiseapp:::load_overview_metadata(params, clear_credentials = clear_credentials)
+      }, package_path = package_path, development_package = development_package,
+        params = params, clear_credentials = identical(params$origin, "ui"),
+        .compute = "default",
+        .timeout = .wise_step2_async_timeout_ms("metadata"))
+    }, error = function(e) e)
     if (inherits(task, "error")) {
       on_error(task)
     } else if (is.null(task)) {

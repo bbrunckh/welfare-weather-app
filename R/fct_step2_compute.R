@@ -11,26 +11,6 @@
   "stored_breaks"
 )
 
-.step2_compute_copy <- function(x) {
-  if (is.null(x) || is.atomic(x)) {
-    return(x)
-  }
-  if (is.data.frame(x)) {
-    out <- lapply(x, .step2_compute_copy)
-    names(out) <- names(x)
-    class(out) <- class(x)
-    row.names(out) <- row.names(x)
-    return(out)
-  }
-  if (is.list(x)) {
-    out <- lapply(x, .step2_compute_copy)
-    names(out) <- names(x)
-    attributes(out) <- attributes(x)
-    return(out)
-  }
-  x
-}
-
 .step2_compute_validate <- function(input) {
   if (!is.list(input) || is.null(names(input))) {
     stop("step2_compute() requires a named ordinary-object input snapshot.",
@@ -152,7 +132,7 @@
 .step2_compute_init_process <- function(input, cache_dir = NULL) {
   .duck_con()
   if (!is.null(cache_dir)) {
-    dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
+    dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE, mode = "0700")
     Sys.setenv(
       WISEAPP_WEATHER_CACHE_DIR = normalizePath(cache_dir, mustWork = FALSE),
       WISEAPP_WEATHER_CACHE_DISABLE = "0"
@@ -211,7 +191,7 @@ step2_compute <- function(input,
   run_id <- as.character(run_id %||% paste0("step2-", .provenance_digest(
     list(seed = seed, now = format(Sys.time(), "%Y%m%dT%H%M%OS3Z"))
   )))[1L]
-  snapshot <- .step2_compute_copy(input)
+  snapshot <- input
   signature <- .step2_compute_signature(snapshot, seed, run_id)
   started <- proc.time()[["elapsed"]]
   events <- list()

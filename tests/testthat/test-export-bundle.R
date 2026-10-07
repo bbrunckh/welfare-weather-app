@@ -296,12 +296,13 @@ test_that("the README states provenance and never leaks credentials", {
   md <- paste(wise_export_readme(list(), prov, list()), collapse = "\n")
 
   expect_match(md, "databricks", fixed = TRUE)
-  expect_match(md, "https://adb-1.example.net", fixed = TRUE)
   expect_match(md, "Welfare", fixed = TRUE)
   expect_match(md, "Run signature", fixed = TRUE)
-  # The identity of the source is recorded; the means of reading it is not.
+  # CR-SEC-05: only the source type is recorded - neither its location nor
+  # the means of reading it.
+  expect_false(grepl("https://adb-1.example.net", md, fixed = TRUE))
+  expect_false(grepl("/Volumes/cat", md, fixed = TRUE))
   expect_false(grepl("TOP-SECRET-VALUE", md, fixed = TRUE))
-  expect_match(md, "redacted", fixed = TRUE)
 })
 
 test_that("the README is honest when nothing has been run", {
@@ -405,12 +406,41 @@ test_that("credential-shaped inputs are never exported (SEC-06)", {
     "overview-db_client_id", "overview-db_client_secret"
   )
   expect_false(any(.export_keep_input(secretish)))
-  # Source identity (never the means of reading it) survives.
-  expect_true(all(.export_keep_input(c(
+  # CR-SEC-05: source identity (type, hosts, buckets, paths) is not carried
+  # either; other steps' settings are.
+  expect_false(any(.export_keep_input(c(
     "overview-connection_type", "overview-db_workspace",
     "overview-db_volume_path", "overview-s3_bucket", "overview-s3_prefix",
     "overview-s3_region", "overview-gcs_bucket", "overview-hf_repo",
     "overview-hf_subdir", "overview-local_path"))))
+  expect_true(all(.export_keep_input(c("step1-model-model_type", "sim-fut_period_1"))))
+})
+
+test_that("config import drops connection settings and says so (CR-SEC-05)", {
+  sent <- character(0)
+  session <- list(
+    input = list(),
+    sendInputMessage = function(id, message) sent <<- c(sent, id)
+  )
+  cfg <- list(inputs = list(
+    "overview-connection_type" = "databricks",
+    "overview-db_workspace" = "https://evil.cloud.databricks.com",
+    "overview-local_path" = "/etc",
+    "step1-model-model_type" = "Linear regression"
+  ))
+  res <- wise_config_apply(cfg, session)
+  expect_identical(sent, "step1-model-model_type")
+  expect_identical(res$applied, "step1-model-model_type")
+  expect_length(res$pending, 0L)
+
+  n <- .import_dropped_connection(cfg)
+  expect_identical(n, 3L)
+  text <- .import_status_text(res, n)
+  expect_match(text, "Applied 1 setting(s).", fixed = TRUE)
+  expect_match(text, "3 data-source setting(s) in the file were not imported", fixed = TRUE)
+  expect_false(grepl("not imported", .import_status_text(res, 0L)))
+  expect_match(.import_status_text(list(applied = "a", pending = c("b", "c")), 0L),
+    "Applied 1 setting(s); 2 more", fixed = TRUE)
 })
 
 test_that("a snapshot of a filled connection form carries no secrets", {
@@ -427,8 +457,8 @@ test_that("a snapshot of a filled connection form carries no secrets", {
     js  <- jsonlite::toJSON(cfg, auto_unbox = TRUE, null = "null", digits = NA)
     expect_false(grepl("TOP-SECRET-VALUE", js, fixed = TRUE))
     expect_false(grepl("AKIAEXAMPLE", js, fixed = TRUE))
-    expect_equal(cfg$inputs$`overview-s3_bucket`, "my-bucket")
-    expect_false("overview-s3_secret" %in% names(cfg$inputs))
+    expect_false(grepl("my-bucket", js, fixed = TRUE))
+    expect_false(any(grepl("^overview-", names(cfg$inputs))))
   })
 })
 
@@ -452,8 +482,9 @@ test_that("importing an exported snapshot never pushes credentials or counters",
     res <- wise_config_apply(back, fake, existing = c(
       "overview-s3_bucket", "overview-s3_key_id", "overview-s3_secret",
       "overview-apply_connection"))
-    expect_equal(res$applied, "overview-s3_bucket")
-    expect_equal(sent$`overview-s3_bucket`, "b")
+    # CR-SEC-05: no connection field is pushed, not even the bucket.
+    expect_length(res$applied, 0L)
+    expect_length(sent, 0L)
     expect_false("overview-apply_connection" %in% names(sent))
     expect_false("overview-s3_key_id" %in% names(sent))
   })

@@ -69,6 +69,28 @@ testthat::test_that("async manifest validation rejects mismatched jobs", {
   )
 })
 
+testthat::test_that("an oversized result artifact reports the size limit (R2-BUG-23)", {
+  root <- tempfile("wiseapp-async-cap-")
+  dir.create(root, recursive = TRUE)
+  on.exit(unlink(root, recursive = TRUE, force = TRUE), add = TRUE)
+  job <- list(id = "job-cap", generation = 1L, artifact_dir = root,
+              dependency_signature_digest = "d")
+  manifest <- list(
+    schema = 2L, job_id = "job-cap", generation = 1L, codec = "qs2",
+    result_basename = "result.qs2", dependency_signature_digest = "d",
+    result_bytes = 3 * 1024^3
+  )
+  testthat::expect_error(
+    .wise_step2_async_read_manifest(manifest, job),
+    "larger than the 2 GB limit"
+  )
+  manifest$result_bytes <- 10
+  testthat::expect_error(
+    .wise_step2_async_read_manifest(manifest, job),
+    "artifact is missing"
+  )
+})
+
 testthat::test_that("queued cancellation removes the job and its artifacts", {
   state <- .wise_step2_async_state
   old_queue <- state$queue
@@ -606,4 +628,12 @@ testthat::test_that("dispatch frees a slot held by a job that no longer exists",
   state$queue <- list()
   .wise_step2_async_dispatch()
   testthat::expect_null(state$active)
+})
+
+testthat::test_that("async job ids leave the global RNG untouched (R2-BUG-18)", {
+  set.seed(42)
+  before <- .Random.seed
+  ids <- c(.wise_step2_async_id(), .wise_step2_async_id())
+  testthat::expect_identical(.Random.seed, before)
+  testthat::expect_false(identical(ids[[1L]], ids[[2L]]))
 })

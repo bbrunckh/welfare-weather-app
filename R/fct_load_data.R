@@ -70,6 +70,45 @@
 }
 
 
+#' Drop the credential state a task left in this process (R2-SEC-02).
+#'
+#' The shared async worker serves tasks from every session. After a task that
+#' carried UI credentials, remove all DuckDB secrets, the Databricks token
+#' cache and the `load_data()` views so a later task cannot reuse them. The
+#' connection and loaded extensions are kept.
+#' @noRd
+.duck_drop_credentials <- function() {
+  .duck$db_tokens <- list()
+  .duck$db_secrets <- list()
+  con <- .duck$con
+  if (is.null(con) || !DBI::dbIsValid(con)) {
+    return(invisible(FALSE))
+  }
+  secrets <- tryCatch(
+    DBI::dbGetQuery(con, "SELECT name FROM duckdb_secrets() WHERE NOT persistent")$name,
+    error = function(e) character(0)
+  )
+  for (name in secrets) {
+    try(DBI::dbExecute(con, paste0(
+      "DROP TEMPORARY SECRET IF EXISTS ", DBI::dbQuoteIdentifier(con, name), ";"
+    )), silent = TRUE)
+  }
+  views <- tryCatch(
+    DBI::dbGetQuery(con, paste(
+      "SELECT view_name FROM duckdb_views()",
+      "WHERE NOT internal AND starts_with(view_name, '_ld_')"
+    ))$view_name,
+    error = function(e) character(0)
+  )
+  for (name in views) {
+    try(DBI::dbExecute(con, paste0(
+      "DROP VIEW IF EXISTS ", DBI::dbQuoteIdentifier(con, name), ";"
+    )), silent = TRUE)
+  }
+  invisible(TRUE)
+}
+
+
 # Canonical identity columns used before the all-column tie-break. The fallback
 # is required because not every supported survey level has a unique ID column.
 .DETERMINISTIC_ORDER_KEYS <- c(
@@ -292,7 +331,7 @@ collect_deterministic <- function(data, keys = NULL) {
 
   # Posit Connect cannot reach the public extension repository, so use the
   # bundled binary there. Automatic source selection is independent of this.
-  if (exists(".on_posit_connect") && .on_posit_connect()) {
+  if (.on_posit_connect()) {
     # Check for a bundled binary first (avoids any network call).
     # Prefer .gz (DuckDB INSTALL decompresses it automatically); fall back
     # to an uncompressed binary if present.
@@ -548,11 +587,11 @@ collect_deterministic <- function(data, keys = NULL) {
 
 .parse_db_csv_response <- function(resp, url) {
   if (inherits(resp, "error") || httr2::resp_is_error(resp)) {
-    stop(
-      "load_data(): Failed to fetch CSV from Databricks (", url, "): ",
-      .http_error_summary(resp),
-      call. = FALSE
-    )
+    # CR-SEC-08: the URL (host and volume path) goes to the log only.
+    stop(wise_user_error(
+      simpleError(paste0("Failed to fetch ", url, ": ", .http_error_summary(resp))),
+      context = paste0("Reading ", basename(url), " from Databricks")
+    ), call. = FALSE)
   }
 
   readr::read_csv(httr2::resp_body_raw(resp), show_col_types = FALSE)

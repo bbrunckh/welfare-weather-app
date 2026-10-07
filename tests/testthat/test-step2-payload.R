@@ -664,3 +664,16 @@ test_that("two models consume one prepared weather manifest", {
   expect_identical(first$hist_sim_result$weather_raw,
                    second$hist_sim_result$weather_raw)
 })
+
+test_that("weather-store lease ids leave the global RNG untouched (R2-BUG-18)", {
+  root <- withr::local_tempdir()
+  store <- step2_weather_store_create("rng-run", "sig-rng", root)
+  set.seed(42)
+  before <- .Random.seed
+  lease <- step2_weather_store_acquire(store)
+  on.exit(step2_weather_store_release(lease), add = TRUE)
+  expect_identical(.Random.seed, before)
+  lease2 <- step2_weather_store_acquire(store)
+  on.exit(step2_weather_store_release(lease2), add = TRUE)
+  expect_false(identical(lease$lease_id, lease2$lease_id))
+})

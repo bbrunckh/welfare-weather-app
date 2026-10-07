@@ -215,6 +215,9 @@ wise_export_items <- function(session = shiny::getDefaultReactiveDomain()) {
 # read them. Credential-shaped ids are dropped outright: the bundle is meant
 # to be shared, and `.provenance_source()` redacts the same shapes on the
 # provenance side - the snapshot must agree with it.
+# Input ids of the Step 0 data-source controls (module namespace "overview").
+.EXPORT_CONNECTION_INPUT <- "^overview-"
+
 .EXPORT_INPUT_DROP <- c(
   "^run_model$", "^run_sim$", "^run_policy_sim$", "^load_", "^refresh",
   # These controls may appear under names that are not known to the app. The
@@ -229,8 +232,43 @@ wise_export_items <- function(session = shiny::getDefaultReactiveDomain()) {
   "^plotly_", "_click$", "_hover$", "_brush$", "_dblclick$",
   "^\\.clientdata", "^sidebar", "^accordion$", "_bounds$", "_center$",
   "_zoom$", "_shape_", "_marker_", "_groups$",
-  "secret", "key", "token", "password", "credential", "client_id", "tenant"
+  "secret", "key", "token", "password", "credential", "client_id", "tenant",
+  # CR-SEC-05: Step 0 connection fields (type, paths, hosts, buckets) are
+  # neither exported nor imported; a shared file cannot point a session at
+  # another data source.
+  .EXPORT_CONNECTION_INPUT
 )
+
+#' Number of Step 0 connection settings in a configuration that are not
+#' imported (CR-SEC-05).
+#' @noRd
+.import_dropped_connection <- function(config) {
+  sum(grepl(.EXPORT_CONNECTION_INPUT, names(config$inputs %||% list())))
+}
+
+#' Status text after an imported configuration was applied (CR-SEC-05).
+#' @noRd
+.import_status_text <- function(res, n_dropped = 0L) {
+  dropped <- if (n_dropped > 0L) {
+    paste0(
+      " ", n_dropped, " data-source setting(s) in the file were not imported;",
+      " the current data source is kept."
+    )
+  } else {
+    ""
+  }
+  if (length(res$pending)) {
+    paste0(
+      "Applied ", length(res$applied), " setting(s); ",
+      length(res$pending), " more will be applied as controls appear.", dropped
+    )
+  } else {
+    paste0(
+      "Applied ", length(res$applied), " setting(s).", dropped,
+      " Re-run each step to refresh results."
+    )
+  }
+}
 
 # How long the import retry keeps waiting for renderUI() controls to appear
 # before it gives up, audibly (see export_menu_server()).
@@ -1155,8 +1193,9 @@ wise_export_readme <- function(entries, provenance = list(), config = list(),
       "interface fills in. Connect to the data source before importing."
     ),
     paste(
-      "- The configuration records the data source's identity, never its",
-      "credentials. Supply those as usual."
+      "- The configuration and provenance record only the data source's type",
+      "and whether it came from the server or the app, never its location or",
+      "credentials. Data-source settings are not imported."
     ),
     ""
   )
@@ -1622,21 +1661,19 @@ export_menu_server <- function(input, output, session,
       import_wake(import_wake() + 1L)
       set_import_status(list(
         class = "alert-success",
-        text = if (length(res$pending)) {
-          paste0(
-            "Applied ", length(res$applied), " setting(s); ",
-            length(res$pending), " more will be applied as controls appear."
-          )
-        } else {
-          "Configuration settings restored. Data-source settings are not imported; re-run each step to refresh results."
-        }
+        text = .import_status_text(res, .import_dropped_connection(cfg))
       ))
       return(invisible(NULL))
     }
+    n_dropped <- .import_dropped_connection(cfg)
     parts <- c(
       verdict$notes,
       if (!is.null(cfg$exported_at)) {
         paste0("Saved ", cfg$exported_at, ".")
+      },
+      if (n_dropped > 0L) {
+        paste0(n_dropped, " data-source setting(s) in the file will not be ",
+          "imported; the current data source is kept.")
       },
       "Press Start to apply the settings and re-run Steps 1 to 3."
     )

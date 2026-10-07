@@ -50,6 +50,27 @@
   out
 }
 
+#' Describe a data source for shared records (CR-SEC-05)
+#'
+#' Exports and provenance records leave the app, so they name only the source
+#' type and whether it came from the server configuration ("env") or the UI
+#' ("ui"); hosts, buckets, paths and credentials are never included. The Step 2
+#' run signature, which stays in the session, still uses
+#' `.provenance_source()`.
+#'
+#' @param params Connection parameter list.
+#' @return A list with `type` and `origin`.
+#' @noRd
+.provenance_source_label <- function(params) {
+  if (is.null(params) || !length(params)) {
+    return(list(type = "unknown"))
+  }
+  list(
+    type = as.character(params$type %||% "unknown")[1L],
+    origin = as.character(params$origin %||% "unknown")[1L]
+  )
+}
+
 #' Short, stable digest of a run signature
 #'
 #' The full signature is a nested list of every input a run consumed; a hash of
@@ -159,7 +180,7 @@ wise_provenance <- function(step, result, connection_params = NULL,
     app_version = tryCatch(as.character(golem::get_golem_version()),
       error = function(e) NA_character_
     ),
-    source = .provenance_source(connection_params),
+    source = .provenance_source_label(connection_params),
     survey_version = sig$survey_version %||% NA,
     outcome = one_line(outcome),
     weather = one_line(weather),

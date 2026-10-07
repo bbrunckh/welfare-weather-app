@@ -275,3 +275,39 @@ test_that("step2_compute rejects pipelines whose rows are not aligned (CR-BUG-07
   expect_true(length(failed) > 0L)
   expect_match(paste(unlist(failed), collapse = " "), "svy_row_id has 1")
 })
+
+test_that("step2_compute does not warn about tibble row names (CR-CQ-08)", {
+  input <- step2_compute_fixture()
+  input$svy <- tibble::as_tibble(input$svy)
+  input$sw <- tibble::as_tibble(input$sw)
+  weather <- step2_compute_weather()
+  warnings <- character(0)
+  withCallingHandlers(
+    step2_compute(
+      input, seed = 123L,
+      weather_fn = function(...) weather,
+      pipeline_fn = step2_compute_pipeline
+    ),
+    warning = function(w) {
+      warnings <<- c(warnings, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_false(any(grepl("row names", warnings, ignore.case = TRUE)))
+  expect_false(exists(".step2_compute_copy", envir = asNamespace("wiseapp"), inherits = FALSE))
+  expect_false(exists(".wise_step2_async_find_stores", envir = asNamespace("wiseapp"), inherits = FALSE))
+})
+
+test_that("the Step 2 cache directory is created private (CR-SEC-04)", {
+  skip_on_os("windows")
+  old_umask <- Sys.umask("022")
+  on.exit(Sys.umask(old_umask), add = TRUE)
+  withr::local_envvar(c(
+    WISEAPP_WEATHER_CACHE_DIR = NA_character_,
+    WISEAPP_WEATHER_CACHE_DISABLE = NA_character_
+  ))
+  cache_dir <- tempfile("step2-cache-private-")
+  on.exit(unlink(cache_dir, recursive = TRUE, force = TRUE), add = TRUE)
+  .step2_compute_init_process(list(), cache_dir)
+  expect_identical(as.character(file.info(cache_dir)$mode), "700")
+})
