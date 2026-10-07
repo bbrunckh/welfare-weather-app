@@ -471,3 +471,20 @@ test_that("level outcomes: delta SE matches MC SE for every method", {
     expect_true(abs(ratio - 1) < 0.10, info = sprintf("%s ratio=%.3f", m, ratio))
   }
 })
+
+test_that("level outcomes: unweighted gradients have one entry per row", {
+  # Unweighted total on the level scale used to return a scalar gradient,
+  # which made the F' h product non-conformable.
+  set.seed(4)
+  N <- 50
+  mu <- pmax(stats::rnorm(N, 3, 1), 1.5)
+  F_loading <- matrix(stats::rnorm(N * 2, 0, 0.1), N, 2)
+  for (m in c("mean", "total", "median", "gap", "fgt2", "headcount_ratio",
+              "gini", "prosperity_gap", "avg_poverty")) {
+    res <- wiseapp:::aggregate_with_uncertainty_delta(
+      y_point = mu, F_loading = F_loading, method = m,
+      weights = NULL, pov_line = 3.0, residuals = "none", is_log = FALSE
+    )
+    expect_true(is.finite(res$var_coef), info = m)
+  }
+})

@@ -243,7 +243,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
   N <- length(mu)
   # dwelfare/dy: mu on the log scale, 1 on the level scale. Log outcomes keep
   # the exact arithmetic they had before level outcomes were handled.
-  dw <- if (is_log) mu else 1
+  dw <- if (is_log) mu else rep(1, N)
   W <- if (!is.null(weights)) sum(weights, na.rm = TRUE) else N
   if (!is.finite(W) || W <= 0) W <- N
   w_tilde <- if (!is.null(weights)) weights / W else rep(1 / N, N)
