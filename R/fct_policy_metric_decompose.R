@@ -189,21 +189,40 @@
   ids <- pipeline$svy_row_id[rows]
   idx <- exposure$row_index[rows]
   r1 <- r2 <- numeric(length(rows))
+  # Step 2 anchors predictions to observed welfare (y_obs + beta (W_t - W_svy)),
+  # so the weather terms act on the change from each household's survey-time
+  # weather, not on the absolute level (R2-BUG-06).
+  svy <- prepared$context$svy_baseline
   for (v in names(prepared$products)) {
     p <- prepared$products[[v]]
     x <- exposure$table[[v]][idx]
+    x0 <- svy[[v]][ids]
     if (is.null(p$categories)) {
+      x <- x - x0
       r1 <- r1 + p$repositioning[ids, 1L] * x
       r2 <- r2 + p$interaction[ids, 1L] * x
     } else {
       lookup <- cbind(ids, match(as.character(x), p$categories))
-      r1 <- r1 + p$repositioning[lookup]
-      r2 <- r2 + p$interaction[lookup]
+      lookup0 <- cbind(ids, match(as.character(x0), p$categories))
+      r1 <- r1 + p$repositioning[lookup] - p$repositioning[lookup0]
+      r2 <- r2 + p$interaction[lookup] - p$interaction[lookup0]
     }
   }
-  main <- prepared$delta_main[ids]
-  list(status = "ok", delta_sp = prepared$delta_sp[ids],
-    delta_main_covar = prepared$delta_main_covar[ids], delta_main = main,
+  # R2-BUG-07: a log-outcome transfer is a level amount, so its log effect is
+  # taken against the predicted year-t level, not the observed baseline. Rows
+  # without a finite prediction keep the observed-baseline value.
+  delta_sp <- prepared$delta_sp[ids]
+  y_t <- as.numeric(pipeline$y_point[rows])
+  if (identical(prepared$context$so$transform %||% "", "log")) {
+    transfer <- as.numeric(prepared$context$sp_transfer)[ids]
+    ok <- is.finite(y_t) & is.finite(transfer)
+    delta_sp[ok] <- ifelse(transfer[ok] == 0, 0,
+      log(pmax(exp(y_t[ok]) + transfer[ok], 1e-10)) - y_t[ok])
+  }
+  covar <- prepared$delta_main_covar[ids]
+  main <- delta_sp + covar
+  list(status = "ok", delta_sp = delta_sp,
+    delta_main_covar = covar, delta_main = main,
     delta_res1 = r1, delta_res2 = r2, delta_total = main + r1 + r2,
     prediction_row_id = exposure$prediction_row_id[rows],
     repositioning_modeled = prepared$repositioning_modeled,
@@ -280,8 +299,15 @@
       # Averaging log effects first and converting afterwards is biased.
       # CR-BUG-02: observed baseline on the outcome-currency level scale (the
       # model scale of the log effects), not the stored 2021 PPP column.
-      lvl <- .policy_level_channels(ch, is_log_outcome,
-        as.numeric(prepared$context$y_level_baseline)[pipeline$svy_row_id[rows]])
+      # R2-BUG-07: and against the predicted year-t level where one exists, so
+      # level channels reconcile with the metric states.
+      level_base <- as.numeric(prepared$context$y_level_baseline)[pipeline$svy_row_id[rows]]
+      if (is_log_outcome) {
+        predicted <- exp(as.numeric(pipeline$y_point[rows]))
+        use <- is.finite(predicted)
+        level_base[use] <- predicted[use]
+      }
+      lvl <- .policy_level_channels(ch, is_log_outcome, level_base)
       lvl_weight <- weights * is.finite(lvl)
       lvl[!is.finite(lvl)] <- 0
       for (k in seq_along(.compact_level_channels)) {
@@ -360,7 +386,25 @@
       rep(exposure$table[[v]][exposure$row_index[i]], context$n)
     }), context$weather_vars)
     ch <- .policy_explicit_channels(context, hazards)
-    for (v in columns) out[[v]][i] <- ch[[v]][pipeline$svy_row_id[i]]
+    # Weather channels are linear in the exposure: evaluate at the survey-time
+    # weather too and difference (R2-BUG-06).
+    anchor <- .policy_explicit_channels(context, setNames(
+      lapply(context$weather_vars, function(v) context$svy_baseline[[v]]),
+      context$weather_vars))
+    ch$delta_res1 <- ch$delta_res1 - anchor$delta_res1
+    ch$delta_res2 <- ch$delta_res2 - anchor$delta_res2
+    row <- pipeline$svy_row_id[i]
+    y_t <- pipeline$y_point[i]
+    transfer <- as.numeric(context$sp_transfer)[row]
+    if (identical(context$so$transform %||% "", "log") && is.finite(y_t) &&
+      is.finite(transfer)) {
+      # R2-BUG-07: transfer effect against the predicted year-t level.
+      sp <- if (transfer == 0) 0 else log(pmax(exp(y_t) + transfer, 1e-10)) - y_t
+      ch$delta_main[row] <- ch$delta_main[row] - ch$delta_sp[row] + sp
+      ch$delta_sp[row] <- sp
+    }
+    ch$delta_total <- ch$delta_main + ch$delta_res1 + ch$delta_res2
+    for (v in columns) out[[v]][i] <- ch[[v]][row]
   }
   c(list(status = "ok"), out)
 }

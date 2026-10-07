@@ -367,6 +367,50 @@ test_that("annual continuous and category channels equal explicit reference row 
   }
 })
 
+test_that("weather channels act on the change from survey-time weather (R2-BUG-06)", {
+  for (engine in c("fixest", "rif")) for (binned in c(FALSE, TRUE)) {
+    fx <- annual_channel_fixture(engine, binned, "none")
+    p <- .prepare_policy_annual_channels(fx$context, "annual-run")
+    # Exposure equal to each household's own survey weather: no weather change,
+    # so repositioning and interaction must vanish.
+    pipe <- fx$pipeline
+    tab <- pipe$weather_exposure$table
+    ids <- pipe$svy_row_id
+    for (v in c("temp", "rain")) tab[[v]] <- fx$base[[v]][ids]
+    pipe$weather_exposure$table <- tab
+    same <- .policy_annual_channels(pipe, p, "annual-run")
+    expect_equal(same$delta_res1, rep(0, length(ids)), tolerance = 1e-12)
+    expect_equal(same$delta_res2, rep(0, length(ids)), tolerance = 1e-12)
+    expect_equal(same$delta_total, same$delta_main, tolerance = 1e-12)
+    ref <- .policy_annual_channels_reference(pipe, fx$context, "annual-run")
+    expect_equal(ref$delta_res1, rep(0, length(ids)), tolerance = 1e-12)
+    expect_equal(ref$delta_res2, rep(0, length(ids)), tolerance = 1e-12)
+  }
+})
+
+test_that("log-outcome transfer is realised against the predicted year-t level (R2-BUG-07)", {
+  for (engine in c("fixest", "rif")) {
+    fx <- annual_channel_fixture(engine, transform = "log")
+    p <- .prepare_policy_annual_channels(fx$context, "annual-run")
+    pipe <- fx$pipeline
+    pipe$y_point <- seq(-0.5, 2.5, length.out = length(pipe$y_point))
+    out <- .policy_annual_channels(pipe, p, "annual-run")
+    transfer <- fx$policy[[SP_TRANSFER_COL]][pipe$svy_row_id]
+    expect_equal(exp(pipe$y_point + out$delta_sp) - exp(pipe$y_point), transfer,
+      tolerance = 1e-10)
+    expect_equal(out$delta_main, out$delta_sp + out$delta_main_covar)
+    expect_equal(out$delta_total, out$delta_main + out$delta_res1 + out$delta_res2)
+    ref <- .policy_annual_channels_reference(pipe, fx$context, "annual-run")
+    for (field in grep("^delta_", names(ref), value = TRUE)) {
+      expect_equal(out[[field]], ref[[field]], tolerance = 1e-12)
+    }
+    # Missing prediction: falls back to the observed-baseline effect.
+    pipe$y_point[2] <- NA_real_
+    na <- .policy_annual_channels(pipe, p, "annual-run")
+    expect_equal(na$delta_sp[2], p$delta_sp[pipe$svy_row_id[2]])
+  }
+})
+
 test_that("zero policy gives zero annual channels", {
   for (engine in c("fixest", "rif")) {
     fx <- annual_channel_fixture(engine)
@@ -410,7 +454,10 @@ test_that("same household ranks stay fixed while annual hazard protection varies
   expect_false(isTRUE(all.equal(out$delta_res1[1], out$delta_res1[6])))
   expect_identical(p$tau_i_pre, fx$context$tau_i_pre)
   expect_identical(p$tau_i_post, fx$context$tau_i_post)
-  expect_equal(out$delta_res1[1], 0) # zero hazards, not absent sensitivity
+  # R2-BUG-06: row 1 has weather 0 against survey temp 12 (sample row 3), so the
+  # anchored weather change is non-zero; the reference implementation agrees.
+  ref <- .policy_annual_channels_reference(fx$pipeline, fx$context, "annual-run")
+  expect_equal(out$delta_res1[1], ref$delta_res1[1], tolerance = 1e-12)
   expect_true(any(p$products$temp$repositioning != 0))
 })
 
@@ -587,7 +634,8 @@ test_that("compact level channels convert log effects per household before avera
   rows <- out$decomp_scenarios$channel_summary
   ch <- .policy_annual_channels(fx$pipeline, out$annual_channels, "annual-run")
   w <- fx$pipeline$weight %||% rep(1, length(fx$pipeline$y_point))
-  b <- fx$base$welfare[fx$pipeline$svy_row_id]
+  # R2-BUG-07: level channels are taken against the predicted year-t level.
+  b <- exp(fx$pipeline$y_point)
   year <- fx$pipeline$sim_year == rows$sim_year[[1L]]
   expected <- stats::weighted.mean(((exp(ch$delta_total) - 1) * b)[year], w[year])
   expect_equal(rows$sum_lvl_total[[1L]] / rows$weight_lvl_total[[1L]], expected)
