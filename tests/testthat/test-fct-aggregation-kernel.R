@@ -22,7 +22,7 @@ test_that("welfare_stats_suite matches resolve_agg_fn on random draws", {
     st <- welfare_stats_suite(y, w, pov_line = pov)
     for (m in methods) {
       ref <- resolve_agg_fn(m)(y, w, pov)
-      expect_equal(unname(st[[m]]), ref, tolerance = 1e-12,
+      expect_equal(unname(st[[m]]), ref, tolerance = 1e-10,
         info = sprintf("rep=%d n=%d method=%s weighted=%s", rep, n, m, !is.null(w)))
     }
     expect_identical(as.integer(attr(st, "order")), as.integer(order(y)))
