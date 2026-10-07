@@ -52,15 +52,15 @@ Goal: close the credential-mixing paths first (CR-SEC-01, R2-SEC-01); the rest a
 | ID | Sev | Eff | Status | Task | Notes |
 |---|---|---|---|---|---|
 | CR-SEC-01 | C | M | ☑ | Auto-connect: do not register apply observer or read connection inputs; never mix UI and env fields; allowlist source types and Databricks hosts (https, no user-info/port) | dbb179e: auto-connect mode registers no apply/source observers and connection_params() refuses; connection all-UI or all-env ($origin field); source-type allowlist; Databricks host = configured host or https Databricks domain, no user-info/port/path, re-checked in workers; testServer + offline tests. Behaviour: partial UI entry no longer picks up env creds; auto-connect failure needs reload. Rotate SP secret after release. |
-| R2-SEC-01 | H | M | ☑ | Track connection provenance; UI connections pass user credentials to the local worker or refuse async; re-validate allowlist in worker | 8b5f537: UI connections passed whole (with creds) to the local daemon, env connections still scrubbed; .connection_field() never fills UI fields from env; UI Azure without creds errors (no managed-identity fallback); tests. No runtime check that daemons are local (comment only). |
+| R2-SEC-01 | H | M | ☑ | Track connection provenance; UI connections pass user credentials to the local worker or refuse async; re-validate allowlist in worker | 8b5f537: UI connections passed whole (with creds) to the local daemon, env connections still scrubbed; .connection_field() never fills UI fields from env; UI Azure without creds errors (no managed-identity fallback); tests. No runtime check that daemons are local (comment only). Wave 2: cbfd3f5 runtime local-daemon check (only ipc/abstract/inproc URLs count as local; UI creds refused otherwise; Step 2 + metadata); 56f72b7 re-indent. |
 | CR-SEC-02 | H | M | ☐ | Allowlist buckets/volume roots/local roots in config; disable `local` in production; DuckDB `enable_external_access`/`allowed_directories`/`lock_configuration`; validate path tokens | |
 | CR-SEC-03 | H | M | ☐ | `SCOPE` on every `CREATE SECRET`; per-session secret names dropped at session end; per-session or per-task connection | |
-| CR-SEC-04 | H | S-M | ☑ | Source identity in weather cache keys; private 0700 dir; `tempfile(tmpdir=)` + rename; LRU via `Sys.setFileTime()`; no eviction under live view; `.sql_literal()` on paths | 3319344: source identity in cache keys (no creds), tempfile+rename, LRU via Sys.setFileTime, no eviction younger than async timeout, .sql_literal paths, 0700 cache dir; tests. Not done: h3 mappings still on disk; fct_step2_compute.R:131 base dir not 0700. Existing cache entries invalidated once. |
-| R2-SEC-02 | M | S-M | ☐ | Clear secrets/token cache/views in `on.exit()` of tasks carrying credentials | Depends on CR-SEC-03 design |
-| CR-SEC-05 | M | S | ☐ | Drop `^overview-` connection ids on config import; fix success message; deployment label in exports/provenance | |
+| CR-SEC-04 | H | S-M | ☑ | Source identity in weather cache keys; private 0700 dir; `tempfile(tmpdir=)` + rename; LRU via `Sys.setFileTime()`; no eviction under live view; `.sql_literal()` on paths | 3319344: source identity in cache keys (no creds), tempfile+rename, LRU via Sys.setFileTime, no eviction younger than async timeout, .sql_literal paths, 0700 cache dir; tests. Not done: h3 mappings still on disk; fct_step2_compute.R:131 base dir not 0700. Existing cache entries invalidated once. Wave 2: 3fb783b Step 2 base cache dir 0700. |
+| R2-SEC-02 | M | S-M | ☑ | Clear secrets/token cache/views in `on.exit()` of tasks carrying credentials | b5bde60: .duck_drop_credentials() (token/secret caches, non-persistent DuckDB secrets, _ld_* views) in on.exit of step2_async_worker/load_overview_metadata when clear_credentials (UI origin, never in sync mode); tests. Independent of CR-SEC-03 SCOPE design. |
+| CR-SEC-05 | M | S | ☑ | Drop `^overview-` connection ids on config import; fix success message; deployment label in exports/provenance | 45bae25: ^overview- ids dropped on import and export; message reports applied/pending/dropped; provenance source = type + origin only; README limits text; export-bundle tests rewritten to the decision. Older configs with overview-* fields are filtered silently (count reported). |
 | CR-SEC-06 | M | S | ☑ | `httr2` `req_timeout()`, `req_retry()`, summarised errors | 15723cd: req_timeout 30 s token / 300 s file, req_retry 3 tries on transient errors, status-only messages; tests check request config (httr2 mock skips retry loop). |
 | CR-SEC-07 | M | L | ☐ | Per-run size limits from config; cap Step 2 queue by bytes; separate small profile for metadata | Rest of async coverage tracked under CR-PERF-04 (B6) |
-| CR-SEC-08 | L-M | S | ☐ | Central `wise_user_error()`: log full condition with id, show short classified message | |
+| CR-SEC-08 | L-M | S | ◐ | Central `wise_user_error()`: log full condition with id, show short classified message | b052875: wise_user_error() (stderr log with 8-char id, classified short message) used for Databricks file errors (no host/volume to user) and the three Step 2 failure notifications. Left: other conditionMessage() display sites (mod_0_overview auto-connect/status detail, mod_1_*, mod_3_06, fct_export). Server stderr still carries full condition incl. hosts. |
 | R2-SEC-03 | L | S | ☑ | Hash token-cache key (SHA-256); cap and expire entries | 872a8d5: SHA-256 (digest) key, expiry-5 min drop, cap 16; test. |
 | R2-SEC-04 | L | S | ☑ | `dir.create(mode = "0700")` for configured artifact/weather roots; unlink in `onStop()` | 24590bf: artifact and weather-store roots 0700; app-created artifact root removed in onStop. Configured weather-store root not removed (ownership unclear). |
 | R2-SEC-05 | L | S | ☑ | `on.exit(unlink())` for `.export_write_echarts()` temp files | e2221c5: temp html and _files removed on every exit path; test. |
@@ -95,8 +95,8 @@ Goal: correct policy results. Keep separate from B3 so output changes are attrib
 | R2-BUG-06 | H (RIF) | M | ☐ | Repositioning: subtract survey-time weather (`W_t - W_svy`); parity test vs `predict_rif` | Reference implementation shares the wrong convention; fix both |
 | R2-BUG-07 | M | M | ☐ | SP effect against predicted year-t level; level channels from predicted states | |
 | R2-BUG-12 | M | S | ☑ | Per-lever `wise_seed(seed, "policy", "<lever>")` streams | e47f815: per-lever wise_seed streams; SP preview uses the sp stream. Changes draws vs earlier runs with the same seed. test-policy-lever-streams. |
-| R2-BUG-13 | M | S-M | ☐ | NA outcome/covariate rows: restrict to referenced rows, treat NA as untreated, report count | |
-| R2-BUG-14 | M | S | ☐ | Block Step 3 when Step 2 is stale, or snapshot `mf` into `hist_sim` | Also CR-BUG-14 residual |
+| R2-BUG-13 | M | S-M | ☑ | NA outcome/covariate rows: restrict to referenced rows, treat NA as untreated, report count | 14121f1: NA baseline outcome/lever delta/transfer rows get zero deltas (untreated); n_na_untreated returned by apply_policy_delta_to_baseline() and shown as notification. Before: decomposition errored (nonfinite main channel); after: ok, other rows equal clean run. Only decomposition path checked, not a full end-to-end NA-welfare Step 3. |
+| R2-BUG-14 | M | S | ☑ | Block Step 3 when Step 2 is stale, or snapshot `mf` into `hist_sim` | bce425f: Step 3 blocked (run + prerequisite banner) when model_fit()$.sig differs from hist_sim$.sig$fit_sig; legacy results without a signature not blocked; test-step3-stale-model. Gap: seed not in fit signature (ranger/xgboost seed-only refit not caught; needs mod_1_07 .fit_sig_from_live). |
 | R2-BUG-17 | L | S | ☑ | `idx[sample.int(length(idx), k)]` in all nine places | 6a71600: idx[sample.int(length(idx), k)] at all 9 sites; test-policy-sample-single. |
 | R2-BUG-26 | L | S | ☐ | Weighted ECDF in legacy decile decomposition; weighted policy input diagnostics; consistent ensemble ranking | |
 
@@ -127,7 +127,7 @@ Goal: measured wins, in the report's rank order. Prerequisite: B3/B4 merged and 
 | Rank | ID | Eff | Status | Task | Gate | Notes |
 |---:|---|---|---|---|---|---|
 | 1 | R2-PERF-06 | M | ☐ | Memoise `metric_decomposition` by (run, method, poverty line); stop forcing it from unmounted `metric_curve_plot1/2` | Bit-identical | 11-105 s per method switch |
-| 2 | CR-PERF-10 | S | ☐ | `gc()` only when RSS guard trips (`fct_get_weather.R:1864, 1898`) | Bit-identical | Prototype -19%/-35%; +2-11% RSS; re-measure on IRN |
+| 2 | CR-PERF-10 | S | ☑ | `gc()` only when RSS guard trips (`fct_get_weather.R:1864, 1898`) | Bit-identical | c6ab54f: bit-identical (hashes BFA hist/1x1/3x3, IRN hist/1x1/3x3). BFA 3x3 110 -> 97 s, RSS 7.2-7.4 -> 5.7-7.1 GB; IRN 1x1 29.2 -> 30.7 s; IRN 3x3 290 -> 311 s (loaded machine), RSS 7.8/8.8 -> 6.5/7.9 GB. Gain limited by default 4096 MB RSS budget. |
 | 3 | R2-PERF-01 | M | ☐ | Shrink Step 2 result (household-constant vectors once, one weather table per scenario, drop `hist_sim_result$svy`); lazy per-scenario read off main thread | Bit-identical | Est. -30-40% |
 | 4 | R2-PERF-04 | S-M | ☐ | Poverty-line change recomputes only poverty methods; columnar threshold table; Step 3 baseline arm reuses Step 2 suites | Bit-identical | 60.8 s on 3x3 |
 | 5 | CR-PERF-04 | M-L | ☐ | Step 1 weather, LASSO/fit, Step 3, exports as tasks on the mirai singleton with `input_task_button()` | Sync vs worker bit-identical | Also covers CR-SEC-07 |
@@ -136,7 +136,7 @@ Goal: measured wins, in the report's rank order. Prerequisite: B3/B4 merged and 
 | 8 | R2-PERF-13 | S | ☐ | Emit displayed method's partial suite first, rest lazily | Bit-identical | 21% of OLS 3x3 worker time |
 | 9 | R2-PERF-10 / CR-PERF-02 | S-M | ☐ | Normalise weather cache keys (Date vs character, year-aligned spans); reuse Step 1 weather for Step 2 historical | Bit-identical | Depends on R2-BUG-01 |
 | 10 | R2-PERF-03 | S-M | ☐ | Identity-keyed prep cache storing row indices, bounded by bytes | Bit-identical | Do not enlarge entry count (2.3 GB) |
-| 11 | R2-PERF-14 | S | ☐ | Drop `spatial` extension (bbox from `h3_cell_to_lat/lng`) | Bbox parity | 1.5 s per process |
+| 11 | R2-PERF-14 | S | ☑ | Drop `spatial` extension (bbox from `h3_cell_to_lat/lng`) | Bbox parity | 968776d: bbox from h3_cell_to_boundary_wkt(); spatial no longer loaded. Parity identical over 72 files / 1.82M cells. Saves 2.7 s INSTALL+LOAD per cold process (0.05 s / 18 MB cached). spatial still bundled (pin, .core_extensions, manifest): drop is a separate decision. |
 | 12 | CR-PERF-15 | S | – | Tracked in B5 | | |
 | 13 | CR-PERF-13 / R2-PERF-08 | S | – | Tracked in B5 | | |
 | 14 | R2-PERF-11 | S | ☐ | Memoise LASSO by inputs | Bit-identical | 3.0 s per click |
@@ -161,7 +161,7 @@ Triage each: fix, or mark `✗` with a reason. Group by file to keep diffs small
 |---|---|---|---|---|---|
 | CR-BUG-03 | M | S | ☑ | Compute RIF after the complete-case filter | eb7c6f0: prepare_outcome/RIF after complete-case filter; test-fct_fit_model (synthetic tau 0.9: 0.78 vs 0.58 before). BFA default spec: no rows dropped, zero change. |
 | CR-BUG-04 | M | S | ☐ | Weighted targeting quantile; model-card note on unweighted fits (method-owner decision on weighting) | Needs decision |
-| CR-BUG-05 | M | M | ☐ | Gap-aware lag windows (`RANGE BETWEEN INTERVAL`); per-variable NA handling | |
+| CR-BUG-05 | M | M | ☑ | Gap-aware lag windows (`RANGE BETWEEN INTERVAL`); per-variable NA handling | af2751e: RANGE window on YEAR*12+MONTH (historical + climate); per-variable NA (if_all filter removed); loc cache and prepared-weather cache versions -> v2. BFA bit-identical (hist/1x1/3x3). IRN changes from per-variable NA only (see Decision log). Gapped-series test. |
 | R2-BUG-08 | M | M | ☐ | LASSO: partial out FE (FWL) or sparse factor FE | |
 | R2-BUG-09 | M | S | ☑ | `vcov = "hetero"` or relabel "HC1 robust" | 7f157c4: relabelled unclustered SEs as IID (non-robust); vcov unchanged (user decision); test. |
 | R2-BUG-10 | M | S | ☑ | Cluster the RIF heterogeneity Wald test; disclose N*K cap | e402f9c: stacked feols clustered on model cluster (else household row id); cap returns NA + note shown on card; tests. |
@@ -170,7 +170,7 @@ Triage each: fix, or mark `✗` with a reason. Group by file to keep diffs small
 | CR-BUG-16 | M | S | ☑ | Join guards (`relationship`, `unmatched`); report dropped rows | 45ff019: many-to-one/one-to-one join guards + dropped-record messages/notifications (weather join, CPI/PPP, panel id); BFA: 407/14,186 records dropped, now reported; tests. |
 | R2-BUG-16 | M | S | ☐ | Align labels ("median" vs mean) and plotting position | |
 | R2-BUG-27 | M | S | ☑ | `unname()` loess predictions | 49a4649: unname() loess predictions; htmlwidgets JSON test. |
-| CR-BUG-10 | L | S | ☐ | One Gini definition; NA-safe weighted median | Only without weights |
+| CR-BUG-10 | L | S | ☑ | One Gini definition; NA-safe weighted median | 553f07e: one weighted-covariance Gini in resolver, C++ kernel and aggregate_outcome; weighted median drops NA-welfare rows. Unweighted Gini was correct + 1/n (BFA 0.408984 -> 0.408845); weighted unchanged (0.373913). NA weights still deferred. |
 | CR-BUG-11 | L | S | ☑ | Four orphan inputs in `mod_2_02` | f8b564f: orphan inputs replaced by defaults (bw 0.05, p10_p90, scenario_x_year, show_coef FALSE); tests updated. |
 | CR-BUG-12 | L | S | ☑ | Namespace `#results_section` | 72a8d9f: results_section container and selectors use ns(); static test. |
 | CR-BUG-13 | L | S | ☑ | Keep GCM names in `model_n` | |
@@ -178,12 +178,12 @@ Triage each: fix, or mark `✗` with a reason. Group by file to keep diffs small
 | CR-BUG-17 | L | S | ☑ | `ORDER BY` before `head(1)` for H3 resolution | 6ebfcb5: .h3_resolution() over all rows, errors on mixed resolutions; test. CMIP6 path still falls back silently to target resolution on error (flag). |
 | CR-BUG-18 | L | S | ☑ | Consistent `skip_coef_draws` flag; safe env parsing | |
 | CR-BUG-19 | L | S | ◐ | `detectCores()` -> `availableCores()` | mod_1_06 fixed earlier (6ee04f3). Left: fct_get_weather.R:53 detectCores (NA-safe, not container-aware); parallelly installed but undeclared. |
-| R2-BUG-18 | L | S | ◐ | `withr::with_seed()`; `tempfile()` ids | 1c0d9db: withr::with_seed jitter in utils_mod_1_helpers.R; test. Left: runif ids in fct_step2_async.R:130, fct_step2_payload.R:403. |
+| R2-BUG-18 | L | S | ☑ | `withr::with_seed()`; `tempfile()` ids | 1c0d9db: withr::with_seed jitter in utils_mod_1_helpers.R; test. Left: runif ids in fct_step2_async.R:130, fct_step2_payload.R:403. Wave 2: 792efe2 async job and lease ids from basename(tempfile()); .Random.seed unchanged test. |
 | R2-BUG-19 | L | S | ☑ | RIF coefficient plot: add covariance term | 3cd6bc3: sqrt(w'Vw) from RIF sub-fit VCV (diag fallback); test. Pre-existing: echart_weather_effect_plot RIF poly curve uses x_mean 0 and misses I(I(temp^2)) term (linear only). |
 | R2-BUG-20 | L | S | ☑ | NA-safe role-flag comparisons | 1edd698: %in% NA-safe role filters (model_select, fit_model Lasso pool, surveystats); model card role counts; tests. |
 | R2-BUG-21 | L | S | ☑ | Weather-load short-circuit must consider outcome | 9037208: outcome in mod_1_05 short-circuit key (re-runs weather load, ~1.5 s warm); test. |
 | R2-BUG-22 | L | S | ☑ | Bin ordering regex: handle minus signs | 1098d5f: signed/-Inf bin ordering regex; fixed regmatches misalignment; test. |
-| R2-BUG-23 | L | S | ☐ | Pre-2015 period starts; accurate artifact-cap error | |
+| R2-BUG-23 | L | S | ☑ | Pre-2015 period starts; accurate artifact-cap error | e3a5a9c: period sliders start at 2015, pre-2015 periods excluded with warning; Step 2 result over 2 GB gives a clear size-cap error; tests. |
 | R2-BUG-24 | L | S | ☐ | Contrast SD residual variance; fallback error scaling; incidence weights; residual-mode checks | |
 | R2-BUG-25 | L | S | ☐ | `batch/02_weather_stats.R:218` signature | Same as RED-06 task |
 | CR-PERF-07 | M | M | ☐ | Slim `model_fit` | Overlaps R2-PERF-02 |
@@ -200,21 +200,21 @@ Quick wins first (R2-A11Y-01/03, CR-A11Y-01..04), then the map table alternative
 | ID | Sev | Eff | Status | Task | Notes |
 |---|---|---|---|---|---|
 | R2-A11Y-03 | M | S | ☑ | `page_navbar(lang = "en")` | |
-| CR-A11Y-01 | M | S | ☐ | `:focus-visible` outline on `.wise-info-icon` | |
-| R2-A11Y-01 | M | S | ☐ | Restore focus style on sidebar accordion headers | |
-| CR-A11Y-02 | M | S | ☐ | Text colours >= 4.5:1 (`#5f6f7d`, status colours, hero text) | |
-| CR-A11Y-03 | M | S | ☐ | `mod_1_06` inline red/grey: theme tokens + icon/prefix | |
-| CR-A11Y-04 | M | S-M | ☐ | `aria_label` on `pill_toggle`, `wave_toggle_slider`, `label = NULL` inputs | |
-| R2-A11Y-02 | M | M | ☐ | Focus ring and selected pill >= 3:1 | |
+| CR-A11Y-01 | M | S | ☑ | `:focus-visible` outline on `.wise-info-icon` | 21174b8: focus-visible 2px outline; test-a11y-contract. |
+| R2-A11Y-01 | M | S | ☑ | Restore focus style on sidebar accordion headers | d308089: focus-visible ring on sidebar accordion headers. |
+| CR-A11Y-02 | M | S | ☑ | Text colours >= 4.5:1 (`#5f6f7d`, status colours, hero text) | d59961b: #718292/#9fb0be -> #5f6f7d (3.95/2.23 -> 5.18), done #00843d (3.02 -> 4.81), failed #d4192b (4.43 -> 5.29), hero text 3.06-4.48 -> 4.84-7.23; hero gradient end #0071bc -> #005a96 (visible). Not browser-checked. |
+| CR-A11Y-03 | M | S | ☑ | `mod_1_06` inline red/grey: theme tokens + icon/prefix | 8dfc791: prerequisites use amber no_data_warning() with icon (6.11:1); grey help text uses theme slate (5.49:1); testServer test. |
+| CR-A11Y-04 | M | S-M | ☑ | `aria_label` on `pill_toggle`, `wave_toggle_slider`, `label = NULL` inputs | 1601fb0: pill_toggle(aria_label=), wave_toggle_slider default name, 15 call sites, mod_3_01 visually-hidden labels, custom.js names ionRangeSlider focus targets (role=slider, value); source-scan test. Date sliders expose raw timestamp in aria-valuenow. Not browser-checked. |
+| R2-A11Y-02 | M | M | ☑ | Focus ring and selected pill >= 3:1 | 2d5db35: solid 2px #0071bc focus ring via bs_theme Sass vars (1.43 -> 5.14:1 on white, 3.12:1 on navbar); selected pill inset edge (1.11 -> 4.62:1). App-wide; not browser-checked. |
 | CR-A11Y-08 | M | M | ☐ | "View as table" for map; ECharts `aria` | |
 | CR-A11Y-09 | M | M | ☐ | axe-core via `shinytest2` in CI | Needs B5 CI |
 | CR-A11Y-05 | L-M | S | ☐ | Tooltip role/`aria-describedby`/Escape; map tooltips dismissible | |
 | R2-A11Y-04 | L | S | ☐ | Darker Okabe-Ito variants or markers; darker label | |
-| R2-A11Y-05 | L | S | ☐ | Skip link, `<main>`, heading levels, `aria-live` status, specific names | |
+| R2-A11Y-05 | L | S | ◐ | Skip link, `<main>`, heading levels, `aria-live` status, specific names | 6b7c4e5: skip link, main landmark (add_main_landmark), h4/h5 -> h1/h2 with visual classes, polite live region on connection status, named info icons and CSV buttons. Left: info popovers without a title still generic. |
 | R2-A11Y-06 | L | S | ☐ | Pan buttons/keyboard pan; >= 24 px targets; remove dead click input | |
 | CR-A11Y-06 | – | – | – | Fixed by bslib 0.12 | Prefer real `<button>` |
 | CR-A11Y-07 | – | – | – | Fixed in live UI | Dead `make_regtable()` only |
-| (info) alt text | L | S | ☐ | `fct_weatherstats.R:1905, 1912` when `alts` is NULL | |
+| (info) alt text | L | S | ☑ | `fct_weatherstats.R:1905, 1912` when `alts` is NULL | b1d3249: weather_plot_layout() default alt names when alts missing; test. |
 
 ## B9 - Code quality and docs (§8)
 
@@ -222,8 +222,8 @@ Largest, least urgent; one PR per file with characterisation tests. Delete dead 
 
 | ID | Sev | Eff | Status | Task | Notes |
 |---|---|---|---|---|---|
-| CR-CQ-08 | L | S | ☑ | Delete dead exports/internals/UI stubs, ~500 unmounted lines in `mod_3_09`; fix `.step2_compute_copy()` warnings | 4e0a678: deleted dead exports/internals/UI stubs (~1,490 lines incl. mod_3_09 437-950, make_regtable, plot_resid_weather, .run_simulation_parallel_chunk); NAMESPACE regenerated. Left (see log): compute_cluster_counts, COEF_VCOV_SPEC_MOULTON, .wise_step2_async_find_stores, .step2_compute_copy, test-only plot helpers. |
-| CR-CQ-05 | L | S | ◐ | Remove five defensive `exists()` checks | 6c32786: removed guards in fct_run_simulation.R and fct_rif_sim.R (+ source-scan test). Left: fct_load_data.R:293, fct_policy_decompose.R:703-706, fct_simulations.R:395. |
+| CR-CQ-08 | L | S | ☑ | Delete dead exports/internals/UI stubs, ~500 unmounted lines in `mod_3_09`; fix `.step2_compute_copy()` warnings | 4e0a678: deleted dead exports/internals/UI stubs (~1,490 lines incl. mod_3_09 437-950, make_regtable, plot_resid_weather, .run_simulation_parallel_chunk); NAMESPACE regenerated. Left (see log): compute_cluster_counts, COEF_VCOV_SPEC_MOULTON, .wise_step2_async_find_stores, .step2_compute_copy, test-only plot helpers. Wave 2: ea8d9e6 (.step2_compute_copy, .wise_step2_async_find_stores), 6b95c87 (compute_cluster_counts, COEF_VCOV_SPEC_MOULTON, key_workers, unused mod_3_09 args). Left: test-only plot helpers, welfare_stats_suite, .wise_navy, okabe-ito scales. |
+| CR-CQ-05 | L | S | ☑ | Remove five defensive `exists()` checks | 6c32786: removed guards in fct_run_simulation.R and fct_rif_sim.R (+ source-scan test). Left: fct_load_data.R:293, fct_policy_decompose.R:703-706, fct_simulations.R:395. Wave 2: 57040da (fct_load_data.R), 4babebd (fct_policy_decompose.R, fct_simulations.R); source-scan test covers all. |
 | CR-CQ-09 | L | S | ☐ | One default data path from config | |
 | CR-CQ-10 | L | S | ☐ | Update `AGENTS.md` (test count, deleted dev scripts, residual modes, engines, Step 0 sources, install one-liner, `test_dir`) | Stale refs in `fct_load_data.R:241`, `dev/00_make_manifest.R:16` |
 | R2-CQ-01 | L | S | ☐ | Track `man/` or `@noRd`; update `NEWS.md` | |
@@ -246,6 +246,9 @@ Record before/after for the BFA headline numbers whenever a batch changes output
 | RIF historical mean welfare (PPP $/day) | 4.22 (LCU model) | | | PPP model: 4.40 (CR-BUG-02) |
 | RIF poverty headcount change | +2.27 pp (LCU model) | | | PPP model: +2.06 pp |
 | Median delta SD / Monte Carlo SD | 0.18 | 0.971 | | Local BFA (OLS, FE year + loc_id_panel, 400 draws): 0.011 -> 0.971 (R2-BUG-03). |
+| Level-outcome delta SD / MC SD (wave 2, 360fb45 + b2c9f4f) | | | | Log outcomes bit-identical (hash, 9 methods). Synthetic level (N 3000): mean 40.5 -> 1.007, median 40.3 -> 1.007, headcount 12.5 -> 1.001, gap 23.2 -> 1.001, fgt2 18.2 -> 0.985, gini 29.6 -> 1.002, prosperity gap 17.2 -> 0.950, avg poverty 28.8 -> 0.984. BFA (real welfare rescaled, real weights, synthetic loading): mean 3.52 -> 1.012, median 2.35 -> 1.013, headcount 3.00 -> 1.009, gap 1.79 -> 1.001, fgt2 1.49 -> 0.995, gini 3.53 -> 0.987, prosperity gap / avg poverty 1.22 -> 0.873. b2c9f4f fixes unweighted level total (scalar gradient error), found at integration. |
+| Gini, unweighted (wave 2, CR-BUG-10, 553f07e) | | | | Old resolver/kernel value was correct + 1/n: BFA 0.408984 -> 0.408845; synthetic n 20 0.44232 -> 0.39232. Weighted unchanged (BFA 0.373913). Weighted median with NA-welfare row: 2.875 -> 2.209. |
+| Weather values (wave 2, CR-BUG-05, af2751e) | | | | BFA bit-identical (hist, 1x1, 3x3). IRN hist: +22,680 rows (8 locations without spei6 now present with t), 271,786 of 2,301,840 values changed; IRN 1x1: +385,560 rows, 4,620,772 of 39,131,280 values changed. Cause: per-variable NA (cells lacking spei6 were dropped from t); t moves for 100 of 427 locations, up to 12.56 C. No real month gaps in local data. Caches v2. |
 
 ## Performance baselines (BFA, report container, medians)
 
@@ -280,3 +283,4 @@ Re-measure locally before B6 and replace these. Source: §1.2, §5.
 - 2026-10-06 - Wave 2 started (branches off dev 7d13c3a): fix/rev-w2-security (R2-SEC-02, local-daemon check, CR-SEC-05, CR-SEC-08 partial, R2-BUG-18 rest, CR-BUG-18, R2-BUG-23, leftovers), fix/rev-w2-step1 (CR-BUG-03, R2-BUG-10/11/19/20/21, CR-BUG-16 report-only), fix/rev-w2-step3 (R2-BUG-14, R2-BUG-13, level-outcome delta gradients, CR-BUG-10, CR-BUG-13, leftovers), fix/rev-w2-a11y (B8 quick wins), fix/rev-w2-weather (CR-BUG-05, CR-PERF-10, R2-PERF-14). Decisions: R2-BUG-14 -> block Step 3 when model changed; R2-BUG-13 -> NA rows untreated + reported; level-outcome gradients -> fix now with MC check; CR-SEC-05 -> drop overview-* ids on import, exports/provenance record source type + origin only.
 - 2026-10-06 - Wave 2 mostly blocked: a hook rewrites git to `rtk git` and the worktree-isolation guard refuses it, so security, step3, a11y and weather agents stopped without changes (items back to todo in practice). Step 1 agent finished all 7 findings as patches (plumbing-only git); coordinator applied and committed them on dev (eb7c6f0..45ff019). Agent ran 19+ related test files (0 failures); full suite on dev not run yet (run was denied by the permission classifier).
 - 2026-10-06 - Full suite on dev after Step 1 commits (45ff019): 7185 passed, 0 failed, 0 errors. Manifest regenerated. Wave 2 remainder (security, step3, a11y, weather) not started: worktree agents need git; pending user edit of rtk config ([hooks] exclude_commands = ["git"]) since the isolation guard rejects `rtk git`.
+- 2026-10-07 - Wave 2 remainder integrated on dev: fix/rev-w2-weather (eabb2b4: R2-PERF-14, CR-PERF-10, CR-BUG-05), fix/rev-w2-step3 (b746b37: R2-BUG-03 level gradients, CR-BUG-10, R2-BUG-14, R2-BUG-13, CR-CQ-05, CR-CQ-08), fix/rev-w2-a11y (add4b04: CR-A11Y-01..04, R2-A11Y-01/02/05, alt text), fix/rev-w2-security (2024412: R2-BUG-18, CR-CQ-05, CR-CQ-08, CR-SEC-04, R2-BUG-23, R2-SEC-01 local-daemon check, R2-SEC-02, CR-SEC-05, CR-SEC-08 partial). All merges clean. Full suite found one integration error (unweighted level-outcome total gave a scalar gradient, test-mod_2_02_results.R:75); fixed in b2c9f4f with a regression test. Full suite after fix: 7418 passed, 0 failed, 0 errors. devtools::document() removed compute_cluster_counts.Rd only. Manifest regenerated; deploy-contract passes. Numbers in Decision log. Open follow-ups: R2-BUG-14 seed not in fit signature; R2-BUG-13 not checked end to end; CR-SEC-08 other display sites; R2-A11Y-05 untitled popovers; spatial still bundled (drop decision); a11y changes not browser-checked (focus ring, hero gradient, main landmark, slider JS).
