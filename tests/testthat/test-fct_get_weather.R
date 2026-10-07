@@ -1764,3 +1764,76 @@ test_that("CR-BUG-17: H3 resolution uses every row and rejects mixed resolutions
   empty <- dplyr::tbl(con, dplyr::sql("SELECT NULL::VARCHAR AS h3"))
   expect_error(.h3_resolution(empty, con, "Test"), "contains no H3 cells")
 })
+
+test_that("CR-BUG-05: lag windows are gap-aware and NA handling is per variable", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("duckdb")
+  skip_if_not_installed("duckdbfs")
+  skip_if_not_installed("bit64")
+
+  dir <- withr::local_tempdir()
+  withr::local_envvar(
+    WISEAPP_WEATHER_CACHE_DIR = file.path(dir, "cache"),
+    WISEAPP_WEATHER_CACHE_DISABLE = "1"
+  )
+  con <- make_h3_con()
+  cell <- "85283473fffffff"
+  cell_int <- DBI::dbGetQuery(
+    con, sprintf("SELECT h3_string_to_h3('%s') AS h3", cell)
+  )$h3
+  DBI::dbDisconnect(con, shutdown = TRUE)
+
+  # One cell, one location, Jan-Dec 2016 with tx = month and t = 10 * month.
+  # April is missing entirely (a gap) and June has t missing but tx present.
+  months <- seq(as.Date("2016-01-01"), by = "1 month", length.out = 12L)
+  weather_df <- data.frame(timestamp = months, tx = seq_along(months),
+                           t = 10 * seq_along(months))
+  weather_df$h3 <- rep(cell_int, nrow(weather_df))
+  weather_df$t[6] <- NA
+  weather_df <- weather_df[-4, c("h3", "timestamp", "tx", "t")]
+  h3_df <- data.frame(h3 = cell, code = "TST", year = 2016, survname = "SRV",
+                      loc_id = "loc_1", pop_2020 = 100L)
+  dir.create(file.path(dir, "microdata", "h3", "TST"), recursive = TRUE)
+  dir.create(file.path(dir, "hazard", "weather", "historical", "TST"),
+             recursive = TRUE)
+  arrow::write_parquet(h3_df, file.path(
+    dir, "microdata", "h3", "TST", "TST_2016_SRV_lsms_h3.parquet"
+  ))
+  arrow::write_parquet(weather_df, file.path(
+    dir, "hazard", "weather", "historical", "TST", "TST_era5land.parquet"
+  ))
+  survey_data <- data.frame(
+    timestamp = months, loc_id = "loc_1", code = "TST", year = 2016,
+    survname = "SRV", int_month = as.integer(format(months, "%m")),
+    int_year = 2016L
+  )
+  run <- function(sw) get_weather(
+    survey_data = survey_data,
+    selected_surveys = data.frame(code = "TST", year = 2016, survname = "SRV",
+                                  source = "lsms"),
+    selected_weather = sw, dates = months,
+    connection_params = list(type = "local", path = dir)
+  )$historical
+
+  lag1 <- run(rbind(sw_continuous("tx", 1, 1), sw_continuous("t", 1, 1)))
+  lag1 <- lag1[order(lag1$timestamp), ]
+  by_month <- function(x, col) {
+    stats::setNames(x[[col]], as.integer(format(x$timestamp, "%m")))
+  }
+  tx <- by_month(lag1, "tx")
+  t <- by_month(lag1, "t")
+  # May's previous month (April) is missing: no value, not March's.
+  expect_true(is.na(tx[["5"]]))
+  expect_identical(tx[["6"]], 5)
+  # June's missing t must not drop June's tx: July sees June's tx.
+  expect_true("6" %in% names(tx))
+  expect_identical(tx[["7"]], 6)
+  expect_true(is.na(t[["7"]]))
+  expect_identical(t[["6"]], 50)
+  expect_identical(t[["8"]], 70)
+
+  # Three-month window for June covers March-May; April contributes nothing.
+  lag3 <- by_month(run(sw_continuous("tx", 1, 3)), "tx")
+  expect_identical(lag3[["6"]], mean(c(3, 5)))
+  expect_identical(lag3[["7"]], mean(c(5, 6)))
+})

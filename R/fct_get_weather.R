@@ -437,7 +437,7 @@ WISEAPP_WX_ROUND_DIGITS <- 5L
 # irrelevant to every consumer (rolling windows ORDER BY timestamp; results    #
 # are arranged before collect).                                                #
 
-WISEAPP_WX_LOC_CACHE_VERSION <- "v1"
+WISEAPP_WX_LOC_CACHE_VERSION <- "v2"
 
 # Best-effort COPY of a materialized temp table into the location-month
 # cache (tmp + rename race handling and LRU eviction shared with the raw
@@ -1246,7 +1246,9 @@ get_weather <- function(
     tmin = date_min, tmax = date_max
   ) |>
     dplyr::select(h3, timestamp, dplyr::all_of(weather_vars)) |>
-    dplyr::filter(dplyr::if_all(dplyr::all_of(weather_vars), ~ !is.na(.x))) |>
+    # CR-BUG-05: no whole-row NA filter here. A cell-month missing one
+    # variable still contributes the others; the population-weighted mean
+    # and the rolling windows skip NA per variable.
     dplyr::filter(timestamp >= date_min, timestamp <= date_max),
     detail = paste(length(weather_fnames), "file(s)"))
 
@@ -1388,7 +1390,9 @@ get_weather <- function(
       v <- selected_weather$name[i]
       agg_fn <- agg_fn_map[[selected_weather$temporalAgg[i]]]
       dbplyr::sql(sprintf(
-        "%s(%s) FILTER (WHERE %s IS NOT NULL) OVER (PARTITION BY code, year, survname, loc_id ORDER BY timestamp ROWS BETWEEN %d PRECEDING AND %d PRECEDING)",
+        # CR-BUG-05: RANGE over a month index, so a missing month leaves a
+        # hole in the window instead of pulling in an older month.
+        "%s(%s) FILTER (WHERE %s IS NOT NULL) OVER (PARTITION BY code, year, survname, loc_id ORDER BY (YEAR(timestamp) * 12 + MONTH(timestamp)) RANGE BETWEEN %d PRECEDING AND %d PRECEDING)",
         agg_fn, v, v,
         as.integer(selected_weather$ref_end[i]),
         as.integer(selected_weather$ref_start[i])
@@ -1540,7 +1544,7 @@ get_weather <- function(
         v <- selected_weather$name[i]
         agg_fn <- agg_fn_map[[selected_weather$temporalAgg[i]]]
         dbplyr::sql(sprintf(
-          "%s(%s) FILTER (WHERE %s IS NOT NULL) OVER (PARTITION BY model, code, year, survname, loc_id ORDER BY timestamp ROWS BETWEEN %d PRECEDING AND %d PRECEDING)",
+          "%s(%s) FILTER (WHERE %s IS NOT NULL) OVER (PARTITION BY model, code, year, survname, loc_id ORDER BY (YEAR(timestamp) * 12 + MONTH(timestamp)) RANGE BETWEEN %d PRECEDING AND %d PRECEDING)",
           agg_fn, v, v,
           as.integer(selected_weather$ref_end[i]),
           as.integer(selected_weather$ref_start[i])
