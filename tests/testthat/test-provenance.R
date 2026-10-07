@@ -134,6 +134,15 @@ test_that("the record is built from stored metadata, not live inputs", {
   expect_equal(p$source$type, "databricks")
 })
 
+test_that("provenance records only source type and origin (CR-SEC-05)", {
+  p <- wise_provenance(1L, fake_fit(),
+    connection_params = c(db_params(), origin = "env"))
+  expect_identical(p$source, list(type = "databricks", origin = "env"))
+  flat <- paste(unlist(p), collapse = " ")
+  expect_false(grepl("adb-999|/Volumes/", flat))
+  expect_identical(.provenance_source_label(NULL), list(type = "unknown"))
+})
+
 test_that("specification fallbacks travel with the record", {
   fit <- fake_fit(fallbacks = list(
     list(kind = "model_family", requested = "logistic", used = "linear",
