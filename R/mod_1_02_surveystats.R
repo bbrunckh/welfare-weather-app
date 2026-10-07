@@ -7,7 +7,6 @@
 #' @noRd
 #'
 #' @importFrom shiny NS tagList
-#' @importFrom ggplot2 ggplot aes geom_bar theme_minimal labs theme
 mod_1_02_surveystats_ui <- function(id) {
   ns <- NS(id)
   # The `dt-wrap` column style lives in custom.css. It used to be built here
@@ -449,8 +448,8 @@ mod_1_02_surveystats_server <- function(
 
         if (!survey_tab_added()) {
           # Interview dates bar chart. Grouped columns keep wave totals directly
-          # comparable; the static ggplot renderer (plot_interview_dates)
-          # remains available for design comparisons.
+          # comparable; the archived ggplot renderer remains available under
+          # dev/static plots/ for design comparisons.
           interview_date_chart <- function() {
             unit <- if (is.function(analysis_unit)) analysis_unit() else NULL
             unit_label <- switch(unit %||% "hh",

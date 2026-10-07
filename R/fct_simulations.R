@@ -12,7 +12,7 @@
 
 
 # Internal colour / style helpers ----
-# Used by enhance_exceedance() and plot_pointrange_climate(). Not exported.
+# Used by the exceedance and pointrange renderers. Not exported.
 
 # SSP scenario colours (.ssp_colours) live in utils_plot_theme.R together with
 # the rest of the shared colour system.

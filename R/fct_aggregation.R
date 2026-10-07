@@ -652,7 +652,7 @@ deviation_from_centre <- function(df,
 # NOTE: plot_exceedance() and plot_hist_sim() had no active call sites and
 # were removed (formerly archived under
 # dev/archived_fct/plot_exceedance_archived.R). They are superseded by
-# enhance_exceedance() in fct_sim_compare.R.
+# archived enhance_exceedance() renderer in dev/static plots/sim_compare_static.R.
 
 # Shared aggregation helper ----
 

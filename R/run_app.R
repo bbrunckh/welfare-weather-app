@@ -12,8 +12,6 @@ run_app <- function(onStart = NULL,
                     enableBookmarking = NULL,
                     uiPattern = "/",
                     ...) {
-  # Force Shiny to use the ultra-fast AGG engine for all renderPlot calls
-  options(shiny.useragg = TRUE)
   .wise_apply_thread_limits()
 
   with_golem_options(
