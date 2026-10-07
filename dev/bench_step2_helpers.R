@@ -3,7 +3,7 @@
 .bench_runtime_options <- function(args) {
   names <- c(
     "payload_mode", "weather_storage", "weather_collect", "weather_threads", "join_cache",
-    "direct_rif_predictions", "key_workers"
+    "direct_rif_predictions"
   )
   args[intersect(names, names(args))]
 }

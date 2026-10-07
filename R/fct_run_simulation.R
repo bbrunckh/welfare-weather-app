@@ -269,9 +269,6 @@ prepare_weather_manifest <- function(
 #' @param proj_source      Projection source passed to `get_weather()`.
 #' @param join_cache       Logical. Use the experimental survey-side join
 #'   cache. Defaults to FALSE until full-scale benchmarks establish a win.
-#' @param key_workers      Integer. Opt-in number of multisession workers for
-#'   future keys. Historical execution remains serial and parent-side result
-#'   assembly preserves canonical key order. Values are limited to 1 or 2.
 #' @param direct_rif_predictions Logical. Use direct RIF prediction with
 #'   automatic fallback for unsupported model structures. Defaults to TRUE.
 #' @param progress_fn      Function(value, detail). Called to update progress.
@@ -343,7 +340,6 @@ fct_run_simulation <- function(sw,
                                  proj_source = "cmip6",
                                  weather_manifest = NULL,
                                  join_cache = FALSE,
-                                key_workers = 1L,
                                 direct_rif_predictions = TRUE,
                                 seed = WISEAPP_DEFAULT_SEED,
                                 progress_fn = function(value, detail) invisible(NULL),
@@ -390,10 +386,6 @@ fct_run_simulation <- function(sw,
   weather_collect <- match.arg(weather_collect)
   weather_threads <- match.arg(weather_threads)
   prepared_weather_cache <- match.arg(prepared_weather_cache)
-  key_workers <- as.integer(key_workers)[1L]
-  if (is.na(key_workers) || key_workers < 1L || key_workers > 2L) {
-    stop("key_workers must be an integer between 1 and 2.", call. = FALSE)
-  }
   seed <- as.integer(seed)[1L]
   if (is.na(seed)) seed <- WISEAPP_DEFAULT_SEED
   withr::local_seed(seed)

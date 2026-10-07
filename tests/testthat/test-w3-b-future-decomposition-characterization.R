@@ -134,8 +134,7 @@ test_that("decomposition export contracts expose current future and historical p
         decomp_scenarios = shiny::reactiveVal(scenarios),
         model_fit = shiny::reactiveVal(model),
         so = shiny::reactiveVal(so),
-        baseline_svy = shiny::reactiveVal(survey),
-        policy_svy = shiny::reactiveVal(survey)
+        baseline_svy = shiny::reactiveVal(survey)
       ),
       {
       session$flushReact()

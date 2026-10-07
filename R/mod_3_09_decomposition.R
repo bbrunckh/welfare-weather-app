@@ -257,7 +257,6 @@ mod_3_09_decomposition_ui <- function(id) {
 #' @param selected_policies Reactive selected policy scenario keys.
 #' @param baseline_hist_sim Reactive Step 2-style baseline simulation result.
 #' @param baseline_svy      Reactive baseline survey used for fixed deciles.
-#' @param policy_svy        Reactive realized policy survey.
 #' @param selected_weather Reactive selected weather specification.
 #' @param policy_saved_scenarios Reactive named future scenario list.
 #'
@@ -268,12 +267,10 @@ mod_3_09_decomposition_server <- function(id,
                                           model_fit = reactive(NULL),
                                           variable_list = reactive(NULL),
                                           so = reactive(NULL),
-                                          show_coef_uncertainty = reactive(TRUE),
                                           selected_policies = reactive(NULL),
                                           policy_scenarios = reactive(list()),
                                           baseline_hist_sim = reactive(NULL),
                                           baseline_svy = reactive(NULL),
-                                          policy_svy = reactive(NULL),
                                           selected_weather = reactive(NULL),
                                           sp_scenario = reactive(NULL),
                                           infra_scenario = reactive(NULL),
@@ -282,7 +279,6 @@ mod_3_09_decomposition_server <- function(id,
                                           education_scenario = reactive(NULL),
                                            policy_saved_scenarios = reactive(list()),
                                            stale = reactive(FALSE),
-                                           aggregation_method = reactive("mean"),
                                            poverty_line = reactive(NULL),
                                            analysis_unit = reactive(NULL)) {
   moduleServer(id, function(input, output, session) {

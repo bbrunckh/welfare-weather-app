@@ -128,13 +128,15 @@ aggregate_with_uncertainty_delta <- function(y_point,
     if (all(keep)) keep <- NULL
   }
 
-  # Welfare-scale gradient h_i = (dT/dw_i) * mu_i
+  # Gradient wrt the prediction scale: h_i = (dT/dw_i) * mu_i for log
+  # outcomes, h_i = dT/dw_i for level outcomes.
   h <- if (is.null(keep)) {
     gradient_for_method(method, mu, weights, pov_line, value_pt,
       bandwidth_p0 = bandwidth_p0,
       F_loading    = F_loading,
       prepared_order = prepared_order,
-      F_row_ss     = F_row_ss
+      F_row_ss     = F_row_ss,
+      is_log       = is_log
     )
   } else {
     F_loading <- F_loading[keep, , drop = FALSE]
@@ -142,7 +144,8 @@ aggregate_with_uncertainty_delta <- function(y_point,
       bandwidth_p0 = bandwidth_p0,
       F_loading    = F_loading,
       prepared_order = NULL,
-      F_row_ss     = F_row_ss[keep]
+      F_row_ss     = F_row_ss[keep],
+      is_log       = is_log
     )
   }
   n_coef_dropped <- if (is.null(keep)) 0L else sum(!keep)
@@ -224,7 +227,9 @@ aggregate_point_estimate <- function(mu, method, weights = NULL, pov_line = NULL
 
 
 # Per-method gradient functions ----
-# Each returns h = (dT/dwelfare) * mu, length N. Sign matters - preserves the
+# Each returns h = dT/dy, the gradient wrt the prediction scale y that
+# F_loading perturbs: (dT/dwelfare) * mu when welfare = exp(y) (is_log), and
+# dT/dwelfare when welfare = y (level outcomes). Length N. Sign matters - preserves the
 # direction of perturbation so var = ||F' h||^2 reflects the true Taylor
 # expansion. For aggregates where the sign cancels in the variance (everything
 # here), we still keep it explicit for clarity.
@@ -233,19 +238,23 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
                                 bandwidth_p0 = 0.05,
                                 F_loading = NULL,
                                 prepared_order = NULL,
-                                F_row_ss = NULL) {
+                                F_row_ss = NULL,
+                                is_log = TRUE) {
   N <- length(mu)
+  # dwelfare/dy: mu on the log scale, 1 on the level scale. Log outcomes keep
+  # the exact arithmetic they had before level outcomes were handled.
+  dw <- if (is_log) mu else 1
   W <- if (!is.null(weights)) sum(weights, na.rm = TRUE) else N
   if (!is.finite(W) || W <= 0) W <- N
   w_tilde <- if (!is.null(weights)) weights / W else rep(1 / N, N)
 
   # F_loading carried in for headcount bandwidth tuning (closed over below).
   switch(method,
-    mean = w_tilde * mu,
-    total = if (!is.null(weights)) weights * mu else mu,
+    mean = w_tilde * dw,
+    total = if (!is.null(weights)) weights * dw else dw,
     gap = {
       stopifnot(!is.null(pov_line))
-      -w_tilde * mu * as.numeric(mu < pov_line) / pov_line
+      -w_tilde * dw * as.numeric(mu < pov_line) / pov_line
     },
     prosperity_gap = {
       # Point estimate: mean(pmax(28/mu, 1)); pov_line ignored - $28/day
@@ -254,6 +263,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       # so h_i = -t_i * 28 / w_i below the threshold:
       #   unweighted -28/(N * mu_i); weighted -(w_i/W) * 28/mu_i.
       # Non-positive mu contributes zero (pmax(28/mu, 1) is flat there).
+      # Level outcomes divide by mu once more (dT/dw_i = -t_i * 28 / w_i^2).
       below28 <- is.finite(mu) & mu > 0 & mu < 28
       if (is.null(weights)) {
         h <- rep(0, N)
@@ -263,36 +273,39 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
         h <- rep(0, N)
         if (W > 0) h[below28] <- -(weights[below28] / W) * 28 / mu[below28]
       }
+      if (!is_log) h[below28] <- h[below28] / mu[below28]
       h
     },
     fgt2 = {
       stopifnot(!is.null(pov_line))
-      -2 * w_tilde * mu * pmax(pov_line - mu, 0) / pov_line^2
+      -2 * w_tilde * dw * pmax(pov_line - mu, 0) / pov_line^2
     },
     headcount_ratio = {
       stopifnot(!is.null(pov_line))
       # Kernel-smoothed indicator on welfare scale:
       #   1{w < z_p} ~ Phi((z_p - w)/b_w)
       # Auto-tune bandwidth: max(user_b * z_p, median per-obs welfare SE).
-      # The per-obs welfare SE is mu_i * sqrt(sum(F_i^2)). Using a bandwidth
+      # The per-obs welfare SE is mu_i * sqrt(sum(F_i^2)) on the log scale
+      # and sqrt(sum(F_i^2)) on the level scale. Using a bandwidth
       # smaller than the typical perturbation magnitude yields an undersmoothed
       # kernel that under-counts threshold crossings.
       b_user <- bandwidth_p0 * pov_line
       b_auto <- if (!is.null(F_loading)) {
         log_se <- sqrt(F_row_ss %||% rowSums(F_loading * F_loading))
-        stats::median(mu * log_se, na.rm = TRUE)
+        stats::median(dw * log_se, na.rm = TRUE)
       } else {
         0
       }
       b_w <- max(b_user, b_auto, .Machine$double.eps)
       arg <- (pov_line - mu) / b_w
-      -w_tilde * stats::dnorm(arg) * mu / b_w
+      -w_tilde * stats::dnorm(arg) * dw / b_w
     },
     avg_poverty = {
       # Point estimate: mean(1 / mu) over valid rows ("days needed to earn $1").
       # With h = (dT/dwelfare) * welfare: dT/dw_i = -t_i / w_i^2 for w_i > 0,
       # so h_i = -t_i / w_i, i.e. unweighted -1/(n_ok * mu_i) and weighted
-      # -w_i / (W_ok * mu_i). pov_line ignored.
+      # -w_i / (W_ok * mu_i). pov_line ignored. Level outcomes divide by
+      # mu once more (dT/dw_i itself).
       ok <- is.finite(mu) & mu > 0
       h <- rep(0, N)
       if (is.null(weights)) {
@@ -302,6 +315,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
         W_ok <- sum(weights[ok], na.rm = TRUE)
         if (W_ok > 0) h[ok] <- -weights[ok] / (W_ok * mu[ok])
       }
+      if (!is_log) h[ok] <- h[ok] / mu[ok]
       h
     },
     median = {
@@ -310,7 +324,8 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       # so by implicit differentiation dm/dw_i = k_i / sum(k) with
       #   k_i = w_tilde_i * phi((m - w_i)/b) / b.
       # Lifted to log scale like every other method here:
-      #   h_i = (dm/dw_i) * mu_i = k_i * mu_i / sum(k).
+      #   h_i = (dm/dw_i) * mu_i = k_i * mu_i / sum(k)
+      # (level outcomes: h_i = k_i / sum(k)).
       # Under a common log shift delta, sum(h) * delta ~ m * delta, as it
       # should. (The Hampel influence function used previously is the
       # sampling-variance IF; its gradients sum to ~0 under that shift.)
@@ -325,7 +340,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       if (!is.finite(b) || b <= 0 || !is.finite(k_sum) || k_sum <= 0) {
         return(rep(0, N))
       }
-      k * mu / k_sum
+      k * dw / k_sum
     },
     gini = {
       # Partial-derivative gradient of the weighted Gini wrt y_i, used in
@@ -340,6 +355,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
       #   dG/dy_i = (w_tilde_i / mu_bar) * (2 F_i - 1 - G)
       #   h_i = (dG/dy_i) * y_i = w_tilde_i * y_i * (2 F_i - 1 - G) / mu_bar
       # Scale invariance check: sum h_i = (G*mu_bar - G*mu_bar)/mu_bar = 0.
+      # Level outcomes use dG/dy_i itself (no * y_i).
       valid <- !is.na(mu)
       if (sum(valid) < 2L) {
         return(rep(0, N))
@@ -358,7 +374,7 @@ gradient_for_method <- function(method, mu, weights, pov_line, value_pt,
         return(rep(0, N))
       }
       G_pt <- value_pt
-      h_o <- w_n * mu_o * (2 * F_vec - 1 - G_pt) / mu_bar
+      h_o <- w_n * (if (is_log) mu_o else 1) * (2 * F_vec - 1 - G_pt) / mu_bar
       h <- numeric(N)
       h[ord] <- h_o
       h

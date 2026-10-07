@@ -443,3 +443,31 @@ test_that("combine_ensemble_results: pooled SE matches mean(var) + var(values)",
   expected_var <- mean(vc) + stats::var(vals)
   expect_equal(comb$var_pool, expected_var, tolerance = 1e-10)
 })
+
+test_that("level outcomes: delta SE matches MC SE for every method", {
+  # Level (non-log) outcome: welfare = y, so the gradient wrt y is dT/dw
+  # without the extra mu factor used on the log scale. Before the fix every
+  # method was off by roughly the welfare level (~3x here).
+  set.seed(3)
+  N <- 4000
+  y <- pmax(stats::rnorm(N, 3, 1), 1.5)
+  pipe <- list(
+    y_point = y,
+    F_loading = cbind(rep(0.1, N), stats::rnorm(N, 0, 0.1),
+                      stats::rnorm(N, 0, 0.1)),
+    weights = stats::runif(N, 0.5, 2)
+  )
+  methods <- c("mean", "median", "total", "headcount_ratio", "gap", "fgt2",
+               "gini", "prosperity_gap", "avg_poverty")
+  for (m in methods) {
+    res <- wiseapp:::aggregate_with_uncertainty_delta(
+      y_point = pipe$y_point, F_loading = pipe$F_loading, method = m,
+      weights = pipe$weights, pov_line = 3.0, residuals = "none",
+      is_log = FALSE
+    )
+    se_mc <- mc_se(pipe, m, weights = pipe$weights, pov_line = 3.0,
+                   is_log = FALSE, S = 2000)
+    ratio <- sqrt(res$var_coef) / se_mc
+    expect_true(abs(ratio - 1) < 0.10, info = sprintf("%s ratio=%.3f", m, ratio))
+  }
+})

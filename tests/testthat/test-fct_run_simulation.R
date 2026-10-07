@@ -325,18 +325,6 @@ test_that("weather thread mode is forwarded to the weather loader", {
   expect_identical(captured, "2")
 })
 
-test_that("key worker count is bounded to the characterization range", {
-  wr <- make_ledger_weather_result(with_ssp5 = FALSE)
-  expect_error(
-    run_ledger_sim(wr, key_workers = 0L),
-    "key_workers must be an integer between 1 and 2"
-  )
-  expect_error(
-    run_ledger_sim(wr, key_workers = 3L),
-    "key_workers must be an integer between 1 and 2"
-  )
-})
-
 test_that("historical preview is emitted before future keys and stays bounded", {
   wr <- make_ledger_weather_result(with_ssp5 = FALSE)
   order <- character(0)
@@ -516,11 +504,16 @@ test_that("a group whose members all fail still completes once, then the run err
 })
 
 test_that("profiling helpers are called without defensive exists() guards (CR-CQ-05)", {
-  src <- testthat::test_path("..", "..", "R", c("fct_run_simulation.R", "fct_rif_sim.R"))
+  src <- testthat::test_path("..", "..", "R", c(
+    "fct_run_simulation.R", "fct_rif_sim.R", "fct_simulations.R",
+    "fct_policy_decompose.R"
+  ))
   skip_if(!all(file.exists(src)), "R/ source tree not available (installed package)")
   text <- unlist(lapply(src, readLines, warn = FALSE))
   expect_false(any(grepl(
     "exists\\(\"\\.(wx_process_tree_rss_bytes|prediction_profile_record)\"", text)))
+  expect_false(any(grepl(
+    "exists\\(\"(weighted_baseline_deciles|baseline_weight_column)\"", text)))
   expect_true(is.function(.wx_process_tree_rss_bytes))
   expect_true(is.function(.prediction_profile_record))
 })

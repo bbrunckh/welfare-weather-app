@@ -173,3 +173,28 @@ test_that("uncovered methods and missing poverty lines keep resolver errors", {
     "pov_line required"
   )
 })
+
+test_that("one Gini definition across resolver, kernel and aggregate_outcome (CR-BUG-10)", {
+  # Standard sample Gini for 1:4 is 0.25; the old unweighted rank form
+  # returned 0.25 + 1/n = 0.5.
+  y <- c(4, 1, 3, 2)
+  expect_equal(resolve_agg_fn("gini")(y, NULL, NULL), 0.25)
+  expect_equal(unname(welfare_stats_suite(y)[["gini"]]), 0.25)
+  expect_equal(resolve_agg_fn("gini")(y, rep(2, 4), NULL), 0.25)
+  df <- data.frame(sim_year = 1L, y = y, wt = c(1, 2, 3, 4))
+  expect_equal(aggregate_outcome(df, "y", aggregate = "gini")$value, 0.25)
+  expect_equal(
+    aggregate_outcome(df, "y", aggregate = "gini", weights = "wt")$value,
+    resolve_agg_fn("gini")(y, df$wt, NULL)
+  )
+})
+
+test_that("weighted median ignores the weight of missing welfare rows (CR-BUG-10)", {
+  # Without the NA row the weighted median of 1:4 (weights 1) is 2. The NA
+  # row carried weight 10 into the denominator, so the 0.5 crossing fell on
+  # the missing row and the result was NA before the fix.
+  y <- c(1, 2, NA, 3, 4)
+  w <- c(1, 1, 10, 1, 1)
+  expect_equal(resolve_agg_fn("median")(y, w, NULL), 2)
+  expect_equal(unname(welfare_stats_suite(y, w)[["median"]]), 2)
+})

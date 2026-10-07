@@ -379,6 +379,29 @@ test_that("zero policy gives zero annual channels", {
   }
 })
 
+test_that("rows with missing outcome or lever values are untreated and counted (R2-BUG-13)", {
+  for (engine in c("fixest", "rif")) for (transform in c("none", "log")) {
+    fx <- annual_channel_fixture(engine, transform = transform)
+    clean <- .policy_annual_channels(fx$pipeline,
+      .prepare_policy_annual_channels(fx$context, "annual-run"), "annual-run")
+    base <- fx$base
+    base$welfare[12] <- NA # missing outcome
+    base$x[3] <- NA        # missing lever covariate (policy sets x = 1)
+    ctx <- .build_decomposition_context(base, fx$policy, fx$model,
+      list(name = "welfare", transform = transform, type = "numeric"),
+      skip_coef = TRUE, run_identity = "annual-run")
+    expect_identical(ctx$n_na_untreated, 2L)
+    prepared <- .prepare_policy_annual_channels(ctx, "annual-run")
+    expect_identical(prepared$status, "ok", info = paste(engine, transform))
+    out <- .policy_annual_channels(fx$pipeline, prepared, "annual-run")
+    na_rows <- fx$pipeline$svy_row_id %in% c(3L, 12L)
+    expect_equal(out$delta_total[na_rows], rep(0, sum(na_rows)))
+    expect_equal(out$delta_total[!na_rows], clean$delta_total[!na_rows],
+      info = paste(engine, transform))
+  }
+  expect_identical(annual_channel_fixture("fixest")$context$n_na_untreated, 0L)
+})
+
 test_that("same household ranks stay fixed while annual hazard protection varies", {
   fx <- annual_channel_fixture()
   p <- .prepare_policy_annual_channels(fx$context, "annual-run")

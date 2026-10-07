@@ -7,6 +7,18 @@
   list(context = context)
 }
 
+# R2-BUG-14: Step 3 combines the live Step 1 fit with the stored Step 2
+# result. The Step 2 run signature records the fit signature it was built
+# from, so a different live fit means Step 2 is stale for the current model
+# and the policy run must not start. Results without a recorded signature
+# are not judged.
+.step2_model_mismatch <- function(mf, hs) {
+  if (is.null(mf) || is.null(hs) || !is.list(hs$.sig)) {
+    return(FALSE)
+  }
+  !identical(mf$.sig, hs$.sig$fit_sig)
+}
+
 #' 3_06_policy_sim Server Functions
 #'
 #' Applies user-defined policy adjustments to survey covariates from the
@@ -206,6 +218,12 @@ mod_3_06_policy_sim_server <- function(id,
         return(.fail(
           "Step 2 simulation must be run before policy simulation."
         ))
+      }
+      if (.step2_model_mismatch(mf, hs)) {
+        return(.fail(paste(
+          "The Step 1 model changed after the Step 2 simulation ran.",
+          "Re-run the Step 2 simulation before simulating policy scenarios."
+        )))
       }
       if (is.null(sw)) {
         return(.fail(paste(
@@ -423,6 +441,18 @@ mod_3_06_policy_sim_server <- function(id,
             "Policy scenario results are ready.",
             type = "message", duration = 3
           )
+          # R2-BUG-13: disclose rows treated as untreated because of missing
+          # values.
+          n_untreated <- pol_out$n_na_untreated %||% 0L
+          if (n_untreated > 0L) {
+            shiny::showNotification(
+              sprintf(paste(
+                "%d survey row(s) with a missing outcome or policy lever value",
+                "were treated as untreated (no policy change)."
+              ), n_untreated),
+              type = "warning", duration = 8
+            )
+          }
         },
         error = function(e) {
           .wise_log_stage("step3_run", "failed", run_id = paste0("step3-", isolate(sim_run_id()) + 1L),
