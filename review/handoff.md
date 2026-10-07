@@ -3,10 +3,10 @@
 Status lives in `review/REVIEW-2026-10-06-tracking.md` (Log and Decision log are current). Wave 2 (security, step3, a11y, weather) is complete and merged into dev; full suite 7418 passed, 0 failed. The per-branch notes below are kept as history.
 
 ## Next
-- Visual check in a browser: app-wide focus ring, darker hero gradient, main landmark wrapper, slider aria JS.
-- Ask user before deleting stale branches fix/rev-w1-*, fix/rev-w2-*, worktree-agent-* (incl. probe worktree-agent-aa28cae4b01775578) and the locked worktrees in .claude/worktrees/.
-- Decisions pending: drop spatial from the DuckDB bundle; the deferred list below.
-- Follow-ups: R2-BUG-14 seed in fit signature (mod_1_07); R2-BUG-13 end-to-end check; CR-SEC-08 remaining display sites; R2-A11Y-05 untitled popovers.
+- Housekeeping done 2026-10-07: secret rotated, Connect and visual checks done, stale branches and worktrees removed.
+- R2-BUG-06, R2-BUG-07, CR-BUG-06 implemented 2026-10-07, uncommitted on dev (full suite passes); no BFA numbers yet (Step 3 bench harness fixtures do not fit BFA; needs a manual Step 3 run in the app). Next: R2-PERF-06 (memoise metric_decomposition).
+- Decisions pending: drop spatial from the DuckDB bundle; CR-BUG-04, R2-BUG-08, R2-BUG-16; the deferred list below; two old git stashes (perf-w2-step3-decompose, perf-w1-step3-kernel).
+- Follow-ups: R2-BUG-14 seed in fit signature (mod_1_07); R2-BUG-13 end-to-end check; CR-SEC-08 remaining display sites; R2-A11Y-05 untitled popovers; surface n_coef_dropped / n_na_dropped / n_na_untreated in the UI.
 
 ## Done
 - Wave 1 and wave-2 Step 1 are merged on `dev`. R2-A11Y-03, CR-BUG-13 and CR-BUG-18 were committed directly on dev (aced553..a183e4a).
@@ -122,10 +122,9 @@ Uncommitted: only the failing regression test for CR-BUG-05, in `test-fct_get_we
 - Numerics: log before/after in the tracker decision log.
 
 ## Still deferred (need decisions or config)
-- CR-BUG-02 and R2-BUG-04 (currency/scale design), R2-BUG-06/07.
+- R2-BUG-06/07 (CR-BUG-02 and R2-BUG-04 are done, 0228c1c and 134170e).
 - CR-SEC-02 (allowlist config), CR-SEC-03 (secret SCOPE design), CR-SEC-09 (inline JS/CSS move).
 - CR-BUG-06 (partial CMIP6 members), CR-BUG-04 (weighting), NA survey weights (drop vs fail).
 - CR-BUG-19 (would add parallelly), R2-BUG-08 (LASSO FE), R2-BUG-16 (plotting position), R2-BUG-24, R2-BUG-26.
 - Most of B6 performance, CR-A11Y-05/08/09, R2-A11Y-04/06, B9 refactors.
 - New: whether to drop the spatial extension from the DuckDB bundle (R2-PERF-14 follow-up).
-- Ops: rotate the Databricks service-principal secret after the CR-SEC-01 release.
