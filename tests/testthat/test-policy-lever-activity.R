@@ -127,3 +127,17 @@ test_that("a changed scenario changes the survey and is active", {
   expect_true(.scenario_has_effect(svy, modified))
   expect_match(card_text(sp_scenario = sp_on), "1 policy", fixed = TRUE)
 })
+
+
+test_that("the Step 3 summary shows the SP amount in the entry currency", {
+  # R2-BUG-04: an LCU amount must not be labelled with a dollar sign.
+  lcu <- utils::modifyList(sp_on, list(transfer_amount_usd = 1200, currency = "LCU"))
+  expect_match(card_text(sp_scenario = lcu), "LCU 1,200/payment", fixed = TRUE)
+  expect_no_match(card_text(sp_scenario = lcu), "$1,200", fixed = TRUE)
+
+  ppp <- utils::modifyList(sp_on, list(transfer_amount_usd = 1200, currency = "PPP"))
+  expect_match(card_text(sp_scenario = ppp), "$1,200/payment", fixed = TRUE)
+  # Scenarios that predate the field stay in dollars.
+  expect_match(card_text(sp_scenario = utils::modifyList(sp_on, list(
+    transfer_amount_usd = 1200))), "$1,200/payment", fixed = TRUE)
+})

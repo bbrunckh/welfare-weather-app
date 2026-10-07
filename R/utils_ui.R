@@ -464,10 +464,11 @@ policy_summary_card <- function(selected_policies = NULL,
   education <- deref(education_scenario)
 
   sp_label <- if (has_sp_change(sp)) {
+    sp_sign <- .sp_currency_prefix(sp$currency)
     amount <- if (isTRUE(sp$transfer_amount_usd > 0)) {
-      paste0("$", format(sp$transfer_amount_usd, trim = TRUE, big.mark = ","), "/payment")
+      paste0(sp_sign, format(sp$transfer_amount_usd, trim = TRUE, big.mark = ","), "/payment")
     } else {
-      paste0("$", format(sp$budget_fixed, trim = TRUE, big.mark = ","), " budget")
+      paste0(sp_sign, format(sp$budget_fixed, trim = TRUE, big.mark = ","), " budget")
     }
     payments <- if (is.finite(sp$transfer_n_payments %||% NA_integer_)) {
       paste0(" x ", sp$transfer_n_payments, "/year")

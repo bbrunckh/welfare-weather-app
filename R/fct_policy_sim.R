@@ -351,8 +351,13 @@ has_sp_change <- function(sp) {
 #' transfer by that weight gives the population cost. Without weights, each row
 #' represents one household and `hhsize` restores its household-level amount.
 #'
+#' `SP_TRANSFER_COL` is on the scale of the stored `welfare` column (2021 PPP).
+#' `currency = "LCU"` converts it back to 2021 LCU (times `ppp2021`) so that
+#' totals are reported in the currency the amount was entered in.
+#'
 #' @param svy_policy    Survey frame after `apply_policy_to_svy()`.
 #' @param analysis_unit `"hh"`, `"ind"` or `"firm"`.
+#' @param currency      `"PPP"` (default) or `"LCU"`; see `sp$currency`.
 #'
 #' @return A named list: `total` (annual population cost), `per_unit` (annual
 #'   amount per recipient), `n_recipients` (sample rows receiving a transfer),
@@ -361,17 +366,19 @@ has_sp_change <- function(sp) {
 #'   mode) and `weighted`
 #'   (whether survey weights were used).
 #' @keywords internal
-.sp_transfer_totals <- function(svy_policy, analysis_unit = "hh") {
+.sp_transfer_totals <- function(svy_policy, analysis_unit = "hh",
+                                currency = "PPP") {
   if (is.null(svy_policy) || !is.data.frame(svy_policy) ||
     !SP_TRANSFER_COL %in% names(svy_policy)) {
-    return(.sp_transfer_totals_values(NULL, svy_policy, analysis_unit))
+    return(.sp_transfer_totals_values(NULL, svy_policy, analysis_unit, currency))
   }
   .sp_transfer_totals_values(
-    svy_policy[[SP_TRANSFER_COL]], svy_policy, analysis_unit
+    svy_policy[[SP_TRANSFER_COL]], svy_policy, analysis_unit, currency
   )
 }
 
-.sp_transfer_totals_values <- function(v, svy, analysis_unit = "hh") {
+.sp_transfer_totals_values <- function(v, svy, analysis_unit = "hh",
+                                       currency = "PPP") {
   zero <- list(
     total = 0, per_unit = 0, n_recipients = 0L,
     n_recipients_weighted = 0, weighted = FALSE
@@ -382,6 +389,11 @@ has_sp_change <- function(sp) {
   }
 
   v <- suppressWarnings(as.numeric(v))
+  # Stored scale (PPP) -> entry currency. No-op when the data carry no ppp2021
+  # (no load-time conversion happened), matching .povline_to_ppp().
+  if (identical(.sp_currency(currency), "LCU") && "ppp2021" %in% names(svy)) {
+    v <- v * suppressWarnings(as.numeric(svy$ppp2021))
+  }
 
   has_w <- "weight" %in% names(svy)
   w <- if (has_w) {
@@ -451,9 +463,17 @@ has_sp_change <- function(sp) {
     rep_len(1, nrow(svy))
   }
 
+  # The amount is entered in the outcome's currency (`sp$currency`), but the
+  # transfer column is added to the stored welfare, which is 2021 PPP. An LCU
+  # amount is divided by the per-row ppp2021 factor (R2-BUG-04); PPP amounts
+  # and data without deflators pass through unchanged.
+  to_welfare_scale <- function(x) {
+    .povline_to_ppp(x, svy, identical(.sp_currency(sp$currency), "LCU"))
+  }
+
   if (sp$budget_mode == "transfer_first") {
     daily_transfer <- (sp$transfer_amount_usd * sp$transfer_n_payments) / 365
-    return(ifelse(eligible, daily_transfer / hhsize_scale, 0))
+    return(to_welfare_scale(ifelse(eligible, daily_transfer / hhsize_scale, 0)))
   }
 
   if (sp$budget_mode == "budget_first") {
@@ -473,10 +493,22 @@ has_sp_change <- function(sp) {
     }
     divisor <- if (w_elig > 0) w_elig else n_eligible
     daily_transfer <- (sp$budget_fixed / divisor) / 365
-    return(ifelse(eligible, daily_transfer / hhsize_scale, 0))
+    return(to_welfare_scale(ifelse(eligible, daily_transfer / hhsize_scale, 0)))
   }
 
   NULL
+}
+
+# Entry currency of an SP scenario: "LCU" or "PPP" (anything else, including a
+# scenario that predates the field, is PPP - the stored welfare scale).
+.sp_currency <- function(currency) {
+  currency <- toupper(as.character(currency %||% "PPP")[1L])
+  if (is.na(currency) || !identical(currency, "LCU")) "PPP" else "LCU"
+}
+
+# Display prefix for SP amounts and costs in the entry currency.
+.sp_currency_prefix <- function(currency) {
+  if (identical(.sp_currency(currency), "LCU")) "LCU " else "$"
 }
 
 
@@ -544,7 +576,9 @@ has_sp_change <- function(sp) {
     return(NULL)
   }
   eligible <- values$eligible
-  totals <- .sp_transfer_totals_values(values$transfer, svy, analysis_unit)
+  totals <- .sp_transfer_totals_values(
+    values$transfer, svy, analysis_unit, sp$currency
+  )
 
   # Eligibility is reported separately from receipt: a scenario with a zero
   # transfer still targets a population, and saying "0 eligible" there would
@@ -679,7 +713,8 @@ has_sp_change <- function(sp) {
       policy_diag[[SP_TRANSFER_COL]]
   }
 
-  totals <- .sp_transfer_totals(policy_diag, analysis_unit)
+  sp_currency <- .sp_currency(sp$currency)
+  totals <- .sp_transfer_totals(policy_diag, analysis_unit, sp_currency)
   vars <- detect_manipulated_vars(
     svy_baseline, policy_diag,
     candidates = candidates
@@ -712,6 +747,7 @@ has_sp_change <- function(sp) {
     transfer_sum = totals$total,
     transfer_pp = totals$per_unit,
     transfer_households = totals$n_households_weighted,
+    transfer_currency = sp_currency,
     input_summary = input_summary,
     analysis_unit = analysis_unit,
     treatment_matrix = policy_treatment_matrix(
@@ -722,7 +758,8 @@ has_sp_change <- function(sp) {
     component_matrix = policy_component_matrix(
       svy_baseline, policy_diag,
       analysis_unit = analysis_unit,
-      candidates = unique(c(candidates, SP_TRANSFER_COL))
+      candidates = unique(c(candidates, SP_TRANSFER_COL)),
+      currency = sp_currency
     )
   )
 }

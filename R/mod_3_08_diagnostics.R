@@ -157,7 +157,8 @@
   out
 }
 
-.format_policy_component_table <- function(df, analysis_unit = "hh") {
+.format_policy_component_table <- function(df, analysis_unit = "hh",
+                                           currency = "PPP") {
   raw <- .policy_component_table_raw(df, analysis_unit)
   if (is.null(raw) || !nrow(raw)) {
     return(raw)
@@ -169,7 +170,10 @@
     ))],
     `Population represented` = fmt_num(raw$`Population represented`, digits = 0),
     `Population share` = fmt_num(raw$`Population share`, digits = 1, suffix = "%"),
-    `Realized cost` = fmt_num(raw$`Realized cost`, digits = 0, prefix = "$"),
+    `Realized cost` = fmt_num(
+      raw$`Realized cost`,
+      digits = 0, prefix = .sp_currency_prefix(currency)
+    ),
     check.names = FALSE, stringsAsFactors = FALSE
   )
   if ("Households represented" %in% names(raw)) {
@@ -416,7 +420,10 @@ mod_3_08_diagnostics_server <- function(id,
         stringsAsFactors = FALSE
       )
       .wise_diag_reactable(df, formats = list(
-        Value = list(digits = 1, prefix = "$", separators = TRUE)
+        Value = list(
+          digits = 1, prefix = .sp_currency_prefix(d$transfer_currency),
+          separators = TRUE
+        )
       ))
     })
 
@@ -489,7 +496,10 @@ mod_3_08_diagnostics_server <- function(id,
               if (identical(d$analysis_unit, "hh")) "household" else "unit"
             )
           ),
-          Value = fmt_num(c(d$transfer_sum, d$transfer_pp), prefix = "$"),
+          Value = fmt_num(
+            c(d$transfer_sum, d$transfer_pp),
+            prefix = .sp_currency_prefix(d$transfer_currency)
+          ),
           stringsAsFactors = FALSE
         )
       },
@@ -692,7 +702,10 @@ mod_3_08_diagnostics_server <- function(id,
           `Population represented` = list(digits = 0, separators = TRUE),
           `Population share` = list(digits = 1, suffix = "%"),
           `Households represented` = list(digits = 0, separators = TRUE),
-          `Realized cost` = list(digits = 0, prefix = "$", separators = TRUE)
+          `Realized cost` = list(
+            digits = 0, prefix = .sp_currency_prefix(d$transfer_currency),
+            separators = TRUE
+          )
         )
       )
     })
@@ -723,7 +736,9 @@ mod_3_08_diagnostics_server <- function(id,
         if (is.null(d) || !is.data.frame(d$component_matrix)) {
           return(NULL)
         }
-        .format_policy_component_table(d$component_matrix, d$analysis_unit)
+        .format_policy_component_table(
+          d$component_matrix, d$analysis_unit, d$transfer_currency
+        )
       },
       stale = stale,
       description = "Population affected or covered by social protection and other modeled policy components, including overlap."

@@ -345,6 +345,11 @@ mod_3_01_sp_server <- function(id,
         error = function(e) "PPP"
       )
       if (is.na(currency) || !nzchar(currency)) currency <- "PPP"
+      # The amount is in the outcome's currency; LCU amounts are in 2021 prices,
+      # matching the "LCU (2021)" outcome option (see R2-BUG-04).
+      is_lcu <- identical(.sp_currency(currency), "LCU")
+      currency <- if (is_lcu) "2021 LCU" else currency
+      money_sign <- if (is_lcu) "LCU" else "$"
 
       tagList(
         # Amount and budget mode ----
@@ -355,7 +360,7 @@ mod_3_01_sp_server <- function(id,
           info_popover(
             title = "Amount and budget mode",
             tags$p(
-              tags$b(paste("$ per", unit_word(plural = FALSE))),
+              tags$b(paste(money_sign, "per", unit_word(plural = FALSE))),
               "sets the transfer paid to each recipient", unit_word(plural = FALSE),
               "per payment. The annual cost then depends on the number of recipients",
               "and payments per year."
@@ -375,7 +380,7 @@ mod_3_01_sp_server <- function(id,
             aria_label = "Amount or budget mode",
             choices = stats::setNames(
               c("transfer_first", "budget_first"),
-              c(paste("$ per", unit_word(plural = FALSE)), "Total budget")
+              c(paste(money_sign, "per", unit_word(plural = FALSE)), "Total budget")
             ),
             selected = "transfer_first"
           )
@@ -491,6 +496,19 @@ mod_3_01_sp_server <- function(id,
       }
     )
 
+    # Currency the amounts are entered in: the selected outcome's units. The
+    # transfer is converted to the stored welfare scale (2021 PPP) per row when
+    # this is "LCU" (R2-BUG-04), and costs are reported back in this currency.
+    sp_currency <- reactive({
+      so <- tryCatch(selected_outcome(), error = function(e) NULL)
+      units <- if (is.null(so) || nrow(so) == 0 || !"units" %in% names(so)) {
+        NULL
+      } else {
+        so$units[[1]]
+      }
+      .sp_currency(units)
+    })
+
     # One definition of the scenario, read by both the reach preview below and
     # the module's return API - the preview cannot drift from what is run.
     sp_scenario_spec <- reactive({
@@ -519,7 +537,8 @@ mod_3_01_sp_server <- function(id,
         pmt_cutoff = input$pmt_cutoff %||% NA_real_,
         inclusion_error_pct = input$inclusion_error_pct %||% 10,
         exclusion_error_pct = input$exclusion_error_pct %||% 10,
-        # Transfer amount
+        # Transfer amount, in `currency` (outcome units)
+        currency = sp_currency(),
         transfer_amount_usd = input$transfer_amount_usd %||% 0,
         # Timing - regular programs always have n payments
         transfer_frequency =
@@ -686,11 +705,17 @@ mod_3_01_sp_server <- function(id,
           ),
           selection_card_row(
             name  = paste("Annual transfer per", unit_sg),
-            pills = fmt_num(r$transfer_per_unit, digits = 2, prefix = "$")
+            pills = fmt_num(
+              r$transfer_per_unit,
+              digits = 2, prefix = .sp_currency_prefix(preview_spec$currency)
+            )
           ),
           selection_card_row(
             name  = cost_label,
-            pills = fmt_num(r$transfer_total, digits = 0, prefix = "$")
+            pills = fmt_num(
+              r$transfer_total,
+              digits = 0, prefix = .sp_currency_prefix(preview_spec$currency)
+            )
           )
         ),
         info = paste(
