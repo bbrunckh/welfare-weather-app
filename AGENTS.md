@@ -147,7 +147,7 @@ Target platform: **Posit Connect**. Automatic startup data-source selection is c
 
 Runtime egress: the app serves its fonts locally (`inst/app/fonts/`), but the hex map loads its basemap style and tiles from CARTO (`tiles.basemaps.cartocdn.com`, see `inst/app/vendor/hexmap.js`). The server must allow HTTPS to that host for map views; everything else needs only the configured data source.
 
-Bundled DuckDB extensions (`inst/duckdb_extensions/`) are built for the exact `duckdb` version pinned in `DESCRIPTION` (currently 1.5.5) and are checked against pinned SHA-256 values in `R/fct_load_data.R` before they are installed on Connect. To upgrade DuckDB, rebuild the binaries and update the pin, the version constant and the checksums together.
+Bundled DuckDB extensions (`inst/duckdb_extensions/`) are built for the exact `duckdb` version pinned in `DESCRIPTION` (currently 1.5.6) and are checked against pinned SHA-256 values in `R/fct_load_data.R` before they are installed on Connect. To upgrade DuckDB, rebuild the binaries and update the pin, the version constant and the checksums together.
 
 Optional resource limits (unset = package/DuckDB defaults). Every Connect process runs a main R process plus a mirai daemon, each with its own in-memory DuckDB, so cap them on shared hosts:
 - `WISEAPP_DUCKDB_MEMORY_LIMIT` (for example `4GB`) and `WISEAPP_DUCKDB_THREADS` (per DuckDB instance); `WISEAPP_DUCKDB_TEMP_DIR` (spill directory, default a per-process temp dir)

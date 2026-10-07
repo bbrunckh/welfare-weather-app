@@ -241,10 +241,10 @@ collect_deterministic <- function(data, keys = NULL) {
 # built for. DuckDB refuses to load an extension built for another version, so
 # DESCRIPTION pins duckdb to the same version. Rebuild the binaries, update
 # these two constants and the DESCRIPTION pin together when upgrading.
-.DUCKDB_BUNDLE_VERSION <- "1.5.5"
+.DUCKDB_BUNDLE_VERSION <- "1.5.6"
 .DUCKDB_BUNDLE_SHA256 <- c(
-  h3 = "5da3520ef7055e893e7551aaef0a6ed9073e3545f6fbb621e7524ab970bfdb8b",
-  httpfs = "b2ee03ff84b8df7e24730a5362d652413cfdd7270bb17a43dad246e2164e3e00"
+  h3 = "8318026b801a060802f15b57547f5500f969946ee48ab65fd344ef7c2d069899",
+  httpfs = "19e6906934a845487c96f9c94beee250c71e32bb9be260eb27ad96939a1df5f0"
 )
 
 #' Check that a bundled extension binary matches the installed DuckDB and the
