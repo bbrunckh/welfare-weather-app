@@ -441,6 +441,18 @@ mod_3_06_policy_sim_server <- function(id,
             "Policy scenario results are ready.",
             type = "message", duration = 3
           )
+          # R2-BUG-13: disclose rows treated as untreated because of missing
+          # values.
+          n_untreated <- pol_out$n_na_untreated %||% 0L
+          if (n_untreated > 0L) {
+            shiny::showNotification(
+              sprintf(paste(
+                "%d survey row(s) with a missing outcome or policy lever value",
+                "were treated as untreated (no policy change)."
+              ), n_untreated),
+              type = "warning", duration = 8
+            )
+          }
         },
         error = function(e) {
           .wise_log_stage("step3_run", "failed", run_id = paste0("step3-", isolate(sim_run_id()) + 1L),

@@ -641,6 +641,18 @@
   }
   y_raw <- svy_baseline[[outcome]]
   y_baseline <- if (is_log) log(pmax(y_raw, 1e-10)) else y_raw
+  # R2-BUG-13: a row with a missing baseline outcome, lever delta or transfer
+  # is treated as untreated (not dropped, not imputed): its deltas and transfer
+  # are zero and its model-scale baseline is a finite placeholder (0), so every
+  # channel for that row is exactly zero. The count is kept on the context.
+  untreated <- !is.finite(y_baseline) | !is.finite(sp_transfer)
+  for (v in names(deltas)) untreated <- untreated | !is.finite(deltas[[v]])
+  n_na_untreated <- sum(untreated)
+  if (n_na_untreated > 0L) {
+    for (v in names(deltas)) deltas[[v]][untreated] <- 0
+    sp_transfer[untreated] <- 0
+    y_baseline[untreated] <- 0
+  }
 
   reuse_counters <- new.env(parent = emptyenv())
   for (counter in c(
@@ -697,6 +709,7 @@
     weather_vars = snapshot(weather_vars), deltas = snapshot(deltas),
     sp_transfer = snapshot(sp_transfer),
     y_baseline = snapshot(y_baseline),
+    n_na_untreated = n_na_untreated,
     skip_coef = isTRUE(skip_coef), F_hat = F_hat,
     baseline_deciles = snapshot(baseline_deciles %||% if (exists("weighted_baseline_deciles",
       mode = "function"

@@ -216,7 +216,7 @@ test_that("production applies exact annual exposure instead of period-mean broad
   expect_identical(
     names(production),
     c("hist_sim", "saved_scenarios", "annual_channels",
-      "decomp_scenarios", "correction_version")
+      "decomp_scenarios", "correction_version", "n_na_untreated")
   )
   expect_identical(production$correction_version, "row_aligned_annual_v1")
   production_y <- production$hist_sim$pipeline$y_point

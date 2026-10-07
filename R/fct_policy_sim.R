@@ -1400,7 +1400,9 @@ apply_policy_to_svy <- function(svy,
 #'
 #' @return Named list with \code{hist_sim} and \code{saved_scenarios} on the
 #'   Step 2 schema, prepared \code{annual_channels}, compact future
-#'   \code{decomp_scenarios}, and \code{correction_version}. Invalid inputs error.
+#'   \code{decomp_scenarios}, \code{correction_version}, and
+#'   \code{n_na_untreated} (survey rows with a missing outcome, lever value
+#'   or transfer that were treated as untreated). Invalid inputs error.
 #' @export
 apply_policy_delta_to_baseline <- function(svy_baseline,
                                            svy_policy,
@@ -1484,5 +1486,6 @@ apply_policy_delta_to_baseline <- function(svy_baseline,
     annual_channels = annual_channels,
     decomp_scenarios = .bind_compact_future_decompositions(parts, model_fit$engine,
       identical(model_fit$engine, "rif")),
-    correction_version = annual_channels$correction_version)
+    correction_version = annual_channels$correction_version,
+    n_na_untreated = decomp_context$n_na_untreated %||% 0L)
 }
