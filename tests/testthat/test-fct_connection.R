@@ -483,6 +483,9 @@ test_that("extension loading calls .on_posit_connect() without an exists() guard
 .sec02_seed_credentials <- function() {
   .duck$con <- NULL
   con <- .duck_con()
+  # The S3 secret type needs httpfs, which a clean runner does not have yet.
+  tryCatch(.duck_load_ext("httpfs"),
+    error = function(e) testthat::skip(paste("httpfs extension unavailable:", conditionMessage(e))))
   .register_db_secret(con, "user-token", "ab12")
   .register_cached_secret(con, "s3_secret", list(k = "user-key"),
     "CREATE OR REPLACE SECRET s3_secret (TYPE S3, KEY_ID 'user-key', SECRET 'user-secret');")
