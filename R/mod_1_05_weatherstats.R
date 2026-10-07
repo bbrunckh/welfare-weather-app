@@ -991,7 +991,8 @@ mod_1_05_weatherstats_server <- function(
           paste0("Difference from mean", span),
           paste0("Percentile", span)
         ),
-        choiceValues = list("value", "anomaly", "pctile")
+        choiceValues = list("value", "anomaly", "pctile"),
+        aria_label = "Map value"
       )
 
       if (!has_hist) {

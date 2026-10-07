@@ -329,7 +329,8 @@ mod_0_overview_server <- function(id) {
                 "GCS" = "gcs",
                 "S3" = "s3"
               ),
-              selected = "local"
+              selected = "local",
+              aria_label = "Data source"
             )
           ),
           uiOutput(ns("connection_status_ui")),

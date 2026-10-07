@@ -974,7 +974,8 @@ pill_toggle <- function(
   extra_class = NULL,
   layout = c("horizontal", "vertical"),
   disabled = FALSE,
-  disabled_tooltip = NULL
+  disabled_tooltip = NULL,
+  aria_label = NULL
 ) {
   layout <- match.arg(layout)
   if (is.null(choiceNames) && is.null(selected) && length(choices) > 0) {
@@ -996,6 +997,12 @@ pill_toggle <- function(
   }
 
   rb <- do.call(shiny::radioButtons, args)
+  # CR-A11Y-04: with no visible label the radiogroup's aria-labelledby points
+  # at an empty <label>, leaving it unnamed. `aria_label` names it instead.
+  if (is.null(label) && !is.null(aria_label)) {
+    rb$attribs[["aria-labelledby"]] <- NULL
+    rb$attribs[["aria-label"]] <- aria_label
+  }
   # `disabled`: TRUE (every pill) or a character vector of choice values.
   # The selected pill is never disabled. Server-side changes after render go
   # through update_pill_toggle_disabled().
@@ -1088,16 +1095,19 @@ update_input_disabled <- function(session, inputId, disabled = FALSE,
 #' @param selected Currently selected value.
 #' @param label Optional control label.
 #' @param width Optional width.
+#' @param aria_label Accessible name used when `label` is NULL.
 #'
 #' @noRd
-wave_toggle_slider <- function(inputId, choices, selected = NULL, label = NULL, width = NULL) {
+wave_toggle_slider <- function(inputId, choices, selected = NULL, label = NULL, width = NULL,
+                               aria_label = "Survey wave") {
   pill_toggle(
     inputId = inputId,
     choices = choices,
     selected = selected,
     label = label,
     width = width,
-    extra_class = "wave-toggle-slider"
+    extra_class = "wave-toggle-slider",
+    aria_label = aria_label
   )
 }
 

@@ -139,6 +139,7 @@ mod_3_01_sp_server <- function(id,
           pill_toggle(
             inputId = ns("sp_type"),
             label = NULL,
+            aria_label = "Program type",
             choices = c(
               "Regular"          = "regular",
               "Shock-responsive" = "shock"
@@ -184,7 +185,7 @@ mod_3_01_sp_server <- function(id,
           class = "sp-targeting-select",
           selectInput(
             inputId = ns("targeting"),
-            label = NULL,
+            label = tags$span(class = "visually-hidden", "Targeting"),
             choices = stats::setNames(
               c("universal", "exante_poor", "pmt"),
               c(
@@ -371,6 +372,7 @@ mod_3_01_sp_server <- function(id,
           pill_toggle(
             inputId = ns("budget_mode"),
             label = NULL,
+            aria_label = "Amount or budget mode",
             choices = stats::setNames(
               c("transfer_first", "budget_first"),
               c(paste("$ per", unit_word(plural = FALSE)), "Total budget")
@@ -461,7 +463,7 @@ mod_3_01_sp_server <- function(id,
             with_grid_num(
               sliderInput(
                 inputId = ns("transfer_n_payments"),
-                label = NULL,
+                label = tags$span(class = "visually-hidden", "Transfers per year"),
                 min = 2, max = 24, value = 6, step = 1
               ),
               11

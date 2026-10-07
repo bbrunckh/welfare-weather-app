@@ -129,3 +129,73 @@ test_that("CR-A11Y-02: small muted and status text reaches 4.5:1", {
   link <- a11y_decl(a11y_css_bodies(rules, ".hero-panel a"), "color")
   expect_gte(a11y_contrast(link, lightest), 4.5)
 })
+
+test_that("CR-A11Y-04: unlabeled pill toggles are named by aria_label", {
+  tag <- pill_toggle("x", choices = c(A = "a", B = "b"), aria_label = "Pick")
+  expect_identical(tag$attribs[["aria-label"]], "Pick")
+  expect_null(tag$attribs[["aria-labelledby"]])
+  # A visible label keeps the native aria-labelledby association.
+  tag <- pill_toggle("x", choices = c(A = "a"), label = "Shown",
+                     aria_label = "Pick")
+  expect_identical(tag$attribs[["aria-labelledby"]], "x-label")
+  expect_null(tag$attribs[["aria-label"]])
+  # Disabled pills go through the tree walk; the name must survive it.
+  tag <- pill_toggle("x", choices = c(A = "a", B = "b"), disabled = TRUE,
+                     aria_label = "Pick")
+  expect_identical(tag$attribs[["aria-label"]], "Pick")
+  tag <- wave_toggle_slider("w", choices = c(`2010` = "k1", `2015` = "k2"))
+  expect_identical(tag$attribs[["aria-label"]], "Survey wave")
+})
+
+test_that("CR-A11Y-04: every label-less pill toggle in R/ passes aria_label", {
+  srcs <- Sys.glob(file.path("..", "..", "R", "*.R"))
+  skip_if(length(srcs) == 0, "R sources not found")
+  bad <- character(0)
+  walk <- function(e, file) {
+    if (!is.call(e)) return(invisible(NULL))
+    fn <- e[[1L]]
+    nm <- if (is.symbol(fn)) as.character(fn) else ""
+    if (nm %in% c("pill_toggle", "wave_toggle_slider")) {
+      an <- names(as.list(e))
+      if (is.null(an)) an <- rep("", length(e))
+      # label is the fourth formal; count positional args to detect it.
+      named <- an[-1L]
+      pos <- sum(!nzchar(named))
+      formals_left <- setdiff(c("inputId", "choices", "selected", "label"),
+                              named)
+      has_label <- "label" %in% named && !is.null(e[["label"]])
+      if (!"label" %in% named && pos >= match("label", formals_left, 99L)) {
+        has_label <- TRUE
+      }
+      if (!has_label && nm == "pill_toggle" && !"aria_label" %in% named) {
+        bad <<- c(bad, paste(file, deparse(e)[1L]))
+      }
+    }
+    for (i in seq_along(e)[-1L]) {
+      a <- e[[i]]
+      if (!missing(a) && is.call(a)) walk(a, file)
+    }
+    invisible(NULL)
+  }
+  for (f in srcs) {
+    for (ex in parse(f, keep.source = FALSE)) walk(ex, basename(f))
+  }
+  expect_identical(bad, character(0), info = paste(bad, collapse = " | "))
+})
+
+test_that("CR-A11Y-04: slider focus targets get role and name in custom.js", {
+  path <- file.path("..", "..", "inst", "app", "www", "custom.js")
+  skip_if_not(file.exists(path), "custom.js not found")
+  js <- paste(readLines(path, warn = FALSE), collapse = "\n")
+  expect_match(js, "setAttribute('role', 'slider')", fixed = TRUE)
+  expect_match(js, "aria-labelledby", fixed = TRUE)
+  expect_match(js, "aria-valuenow", fixed = TRUE)
+})
+
+test_that("CR-A11Y-04: social protection select and slider have hidden labels", {
+  src <- file.path("..", "..", "R", "mod_3_01_sp.R")
+  skip_if_not(file.exists(src), "R sources not found")
+  code <- paste(readLines(src, warn = FALSE), collapse = "\n")
+  expect_match(code, 'visually-hidden", "Targeting"', fixed = TRUE)
+  expect_match(code, 'visually-hidden", "Transfers per year"', fixed = TRUE)
+})

@@ -1853,6 +1853,14 @@ input.form-control:disabled {
   min-width: 0;
 }
 
+/* CR-A11Y-04: these inputs carry a visually hidden label (the visible text
+   is the adjacent .sp-inline-label); keep the empty <label> from adding
+   space. */
+.sp-inline-slider .shiny-input-container > label.control-label,
+.sp-targeting-select .shiny-input-container > label.control-label {
+  margin: 0;
+}
+
 .sp-budget-mode {
   margin-bottom: 0.55rem;
 }

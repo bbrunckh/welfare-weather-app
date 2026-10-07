@@ -1898,6 +1898,7 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
         pill_toggle(
           inputId  = ns("cmp_agg_method"),
           label    = NULL,
+          aria_label = "Aggregation method",
           choices  = agg_choices,
           selected = "mean",
           layout   = "horizontal"
@@ -1905,6 +1906,7 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
         pill_toggle(
           inputId = ns("cmp_deviation"),
           label = NULL,
+          aria_label = "Outcome or change from historical",
           choices = c(
             "Outcome level"                 = "none",
             "Change from historical mean"   = "mean",
@@ -1967,6 +1969,7 @@ plot_step3_adverse_dot <- function(tbl, x_label = "Outcome level",
         pill_toggle(
           ns("annual_distribution_type"),
           label    = NULL,
+          aria_label = "Distribution chart type",
           choices  = c("Violin" = "violin", "Boxplot" = "boxplot"),
           selected = "violin",
           layout   = "horizontal"
