@@ -244,8 +244,7 @@ collect_deterministic <- function(data, keys = NULL) {
 .DUCKDB_BUNDLE_VERSION <- "1.5.5"
 .DUCKDB_BUNDLE_SHA256 <- c(
   h3 = "5da3520ef7055e893e7551aaef0a6ed9073e3545f6fbb621e7524ab970bfdb8b",
-  httpfs = "b2ee03ff84b8df7e24730a5362d652413cfdd7270bb17a43dad246e2164e3e00",
-  spatial = "17df6f89c7f689d8f0a8cc42f1f8c3a9b34323b6286748e40337bb7a9d389f01"
+  httpfs = "b2ee03ff84b8df7e24730a5362d652413cfdd7270bb17a43dad246e2164e3e00"
 )
 
 #' Check that a bundled extension binary matches the installed DuckDB and the
@@ -318,7 +317,7 @@ collect_deterministic <- function(data, keys = NULL) {
 #' LOAD, so a failed load is retried on the next call instead of being
 #' permanently cached.
 #'
-#' @param ext        Extension name e.g. "httpfs", "spatial", "h3".
+#' @param ext        Extension name e.g. "httpfs", "h3".
 #' @param db_token   Bearer token - only required on Posit Connect.
 #' @param ext_base_url Databricks Files API URL to the folder containing
 #'   pre-uploaded .duckdb_extension binaries. Only required on Posit Connect.
@@ -361,7 +360,7 @@ collect_deterministic <- function(data, keys = NULL) {
     DBI::dbExecute(con, sprintf("LOAD '%s';", ext))
   } else {
     # Local: load from cache, otherwise install from network if missing
-    .core_extensions <- c("azure", "delta", "httpfs", "spatial")
+    .core_extensions <- c("azure", "delta", "httpfs")
     tryCatch(
       DBI::dbExecute(con, sprintf("LOAD '%s';", ext)),
       error = function(e) {

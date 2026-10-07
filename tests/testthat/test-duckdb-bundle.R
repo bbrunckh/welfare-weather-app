@@ -18,6 +18,14 @@ test_that("pinned checksums match the bundled extension binaries", {
   }
 })
 
+test_that("every bundled extension binary is pinned and nothing else ships", {
+  dir <- system.file("duckdb_extensions", package = "wiseapp")
+  shipped <- sub("\\.duckdb_extension\\.gz$", "",
+    list.files(dir, pattern = "\\.duckdb_extension\\.gz$"))
+  expect_setequal(shipped, names(.DUCKDB_BUNDLE_SHA256))
+  expect_false("spatial" %in% shipped)
+})
+
 test_that("DESCRIPTION pins duckdb to the bundled extension version", {
   desc <- read.dcf(system.file("DESCRIPTION", package = "wiseapp"),
     fields = "Imports")[1, "Imports"]

@@ -5,7 +5,7 @@
 #' Base/stats helpers used unqualified across the package, plus column names
 #' created dynamically inside dplyr/dbplyr data-masking pipelines (these are
 #' invisible to static code checks and DuckDB SQL translation handles the
-#' spatial/h3 functions directly in the database).
+#' h3 functions directly in the database).
 #'
 #' @importFrom graphics plot.new title
 #' @importFrom stats coef complete.cases model.matrix reorder setNames vcov
