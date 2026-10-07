@@ -380,7 +380,7 @@
       "description": {
         "Package": "duckdb",
         "Title": "DBI Package for the DuckDB Database Management System",
-        "Version": "1.5.5",
+        "Version": "1.5.6",
         "Authors@R": "c(\n    person(\"Hannes\", \"Mühleisen\", , \"hannes@cwi.nl\", role = \"aut\",\n           comment = c(ORCID = \"0000-0001-8552-0029\")),\n    person(\"Mark\", \"Raasveldt\", , \"mark.raasveldt@cwi.nl\", role = \"aut\",\n           comment = c(ORCID = \"0000-0001-5005-6844\")),\n    person(\"Kirill\", \"Müller\", , \"kirill@cynkra.com\", role = \"cre\",\n           comment = c(ORCID = \"0000-0002-1416-3412\")),\n    person(\"Stichting DuckDB Foundation\", role = \"cph\"),\n    person(\"Apache Software Foundation\", role = \"cph\"),\n    person(\"PostgreSQL Global Development Group\", role = \"cph\"),\n    person(\"The Regents of the University of California\", role = \"cph\"),\n    person(\"Cameron Desrochers\", role = \"cph\"),\n    person(\"Victor Zverovich\", role = \"cph\"),\n    person(\"RAD Game Tools\", role = \"cph\"),\n    person(\"Valve Software\", role = \"cph\"),\n    person(\"Rich Geldreich\", role = \"cph\"),\n    person(\"Tenacious Software LLC\", role = \"cph\"),\n    person(\"The RE2 Authors\", role = \"cph\"),\n    person(\"Google Inc.\", role = \"cph\"),\n    person(\"Facebook Inc.\", role = \"cph\"),\n    person(\"Steven G. Johnson\", role = \"cph\"),\n    person(\"Jiahao Chen\", role = \"cph\"),\n    person(\"Tony Kelman\", role = \"cph\"),\n    person(\"Jonas Fonseca\", role = \"cph\"),\n    person(\"Lukas Fittl\", role = \"cph\"),\n    person(\"Salvatore Sanfilippo\", role = \"cph\"),\n    person(\"Art.sy, Inc.\", role = \"cph\"),\n    person(\"Oran Agra\", role = \"cph\"),\n    person(\"Redis Labs, Inc.\", role = \"cph\"),\n    person(\"Melissa O'Neill\", role = \"cph\"),\n    person(\"PCG Project contributors\", role = \"cph\")\n  )",
         "Description": "The DuckDB project is an embedded analytical data management\n    system with support for the Structured Query Language (SQL). This\n    package includes all of DuckDB and an R Database Interface (DBI)\n    connector.",
         "License": "MIT + file LICENSE",
@@ -388,22 +388,24 @@
         "BugReports": "https://github.com/duckdb/duckdb-r/issues",
         "Depends": "DBI, R (>= 4.2.0)",
         "Imports": "methods, utils",
-        "Suggests": "adbcdrivermanager, arrow (>= 13.0.0), bit64, callr, clock,\nDBItest, dbplyr, dplyr, nanoarrow, rlang, sf, testthat (>=\n3.0.0), tibble, vctrs, wk, withr",
+        "Suggests": "adbcdrivermanager, arrow (>= 13.0.0), bit64, callr, clock,\nDBItest, dbplyr (>= 2.6.0), dplyr, nanoarrow, rlang, sf,\ntestthat (>= 3.0.0), tibble, vctrs, wk, withr",
         "Biarch": "true",
         "Config/build/compilation-database": "false",
         "Config/build/never-clean": "true",
         "Config/comment/compilation-database": "Generate manually with\npkgload:::generate_db() for faster pkgload::load_all()",
+        "Config/gha/extra-packages": "adbcdrivermanager=?ignore-unavailable&ignore-build-errors,\narrow=?ignore-build-errors",
+        "Config/comment/gha/extra-packages": "arrow does not compile against\nRtools45, and the aarch64 Windows runner has no binary to\ninstall instead. adbcdrivermanager needs ignore-unavailable as\nwell, and needs it on every runner: CRAN archived it, and pak\nis called with dependencies = \"all\", which resolves Enhances\ntoo, so the package is in the plan and resolves to nothing.\nignore-build-errors does not cover that -- it demotes a failed\nbuild, not a failed lookup. ignore-build-errors stays for the\nday it returns to CRAN and Rtools45 has to build it again.\nExplained in handbook/operations/ci/matrix/README.md.",
         "Config/testthat/edition": "3",
         "Encoding": "UTF-8",
         "SystemRequirements": "xz (for building from source)",
-        "Config/roxygen2/version": "8.0.0.9000",
+        "Config/roxygen2/version": "8.1.0.9000",
         "NeedsCompilation": "yes",
-        "Packaged": "2026-07-24 10:43:59 UTC; kirill",
+        "Packaged": "2026-09-28 19:19:26 UTC; runner",
         "Author": "Hannes Mühleisen [aut] (ORCID: <https://orcid.org/0000-0001-8552-0029>),\n  Mark Raasveldt [aut] (ORCID: <https://orcid.org/0000-0001-5005-6844>),\n  Kirill Müller [cre] (ORCID: <https://orcid.org/0000-0002-1416-3412>),\n  Stichting DuckDB Foundation [cph],\n  Apache Software Foundation [cph],\n  PostgreSQL Global Development Group [cph],\n  The Regents of the University of California [cph],\n  Cameron Desrochers [cph],\n  Victor Zverovich [cph],\n  RAD Game Tools [cph],\n  Valve Software [cph],\n  Rich Geldreich [cph],\n  Tenacious Software LLC [cph],\n  The RE2 Authors [cph],\n  Google Inc. [cph],\n  Facebook Inc. [cph],\n  Steven G. Johnson [cph],\n  Jiahao Chen [cph],\n  Tony Kelman [cph],\n  Jonas Fonseca [cph],\n  Lukas Fittl [cph],\n  Salvatore Sanfilippo [cph],\n  Art.sy, Inc. [cph],\n  Oran Agra [cph],\n  Redis Labs, Inc. [cph],\n  Melissa O'Neill [cph],\n  PCG Project contributors [cph]",
         "Maintainer": "Kirill Müller <kirill@cynkra.com>",
         "Repository": "CRAN",
-        "Date/Publication": "2026-07-25 04:40:07 UTC",
-        "Built": "R 4.5.2; aarch64-apple-darwin20; 2026-07-25 05:40:24 UTC; unix"
+        "Date/Publication": "2026-09-29 08:50:02 UTC",
+        "Built": "R 4.5.2; aarch64-apple-darwin20; 2026-09-29 11:04:20 UTC; unix"
       }
     },
     "echarts4r": {
@@ -4779,7 +4781,7 @@
       "checksum": "b544c98e7d55c33a6c62b5c905878c65"
     },
     "DESCRIPTION": {
-      "checksum": "719d9751120277b490337ab410bdf53e"
+      "checksum": "5f0a51b3b2caf0c15bd6759e8d81df4e"
     },
     "inst/app/_brand.yml": {
       "checksum": "66580c59f1e8321f5a6ab4dc5565cd0a"
@@ -4809,7 +4811,7 @@
       "checksum": "417d85083d6b84b9b61e59d58a9a7774"
     },
     "inst/app/www/custom.css": {
-      "checksum": "57d30b991d57193320ffa468c81c26a2"
+      "checksum": "e637dc5265d1351ecb5e77c3c893c532"
     },
     "inst/app/www/custom.js": {
       "checksum": "676a17232eba5ef6b5ad5f43656b2422"
@@ -4824,10 +4826,10 @@
       "checksum": "c9dcc6529841a312038be68f3a1654c3"
     },
     "inst/duckdb_extensions/h3.duckdb_extension.gz": {
-      "checksum": "ae89b1f7610c04008c1b0311d76a2aca"
+      "checksum": "f9fac7c2a8fd0825a46b6d8fe0fb13f8"
     },
     "inst/duckdb_extensions/httpfs.duckdb_extension.gz": {
-      "checksum": "6d61dae1b933bfad063b4c84fcf22023"
+      "checksum": "8806c00b82b6550bdaa5c801ae5e0efd"
     },
     "inst/golem-config.yml": {
       "checksum": "fb332cd6d7ae6db6e4a60068f803c6f9"
@@ -4878,7 +4880,7 @@
       "checksum": "d4b3f6bf7ea7f3f6de8e1b779bc8ce55"
     },
     "R/fct_load_data.R": {
-      "checksum": "529e0f926357133a8e25e80432374da3"
+      "checksum": "8027b65d942a735000a7b7790f06da12"
     },
     "R/fct_loc_panel.R": {
       "checksum": "b2407043eb1f27a5b8ca7701cf027047"
@@ -4908,7 +4910,7 @@
       "checksum": "2d4a40c7eea1270e4fd91fab38918d17"
     },
     "R/fct_policy_sim_compare.R": {
-      "checksum": "29f78fc2e4aaf02c5e06c1a15d9f7818"
+      "checksum": "09a5da2c1736bb5c68f1f86d3a1f0595"
     },
     "R/fct_policy_sim.R": {
       "checksum": "bb8ed4316d3a062d48e31f068600d80f"
@@ -4929,22 +4931,22 @@
       "checksum": "2db60e90293bfddda70b6ca0fa6b76bf"
     },
     "R/fct_run_simulation.R": {
-      "checksum": "7d8d5153fc41680757015bd7840897e7"
+      "checksum": "fa50a2516db079ae061848affe0c6b58"
     },
     "R/fct_sample.R": {
       "checksum": "fd9166bd2b9dd590f5deb3b82185df53"
     },
     "R/fct_sim_compare.R": {
-      "checksum": "8d737deb318cf01c35cc9e67f940ab20"
+      "checksum": "19b30a0e1aaaaaa3dad44eea714715aa"
     },
     "R/fct_sim_diag.R": {
-      "checksum": "06a5adac1d12ce3caf8459e47ee9d16a"
+      "checksum": "23548950372a810124d78cef91bb4558"
     },
     "R/fct_simulations.R": {
       "checksum": "36ea2377e9dceea9f3c1915b66fdcbf4"
     },
     "R/fct_step1_headline.R": {
-      "checksum": "e4a99d4385b5b133a270f2e0bd61120a"
+      "checksum": "474fab76d9565895ede55b35ce81b554"
     },
     "R/fct_step2_async.R": {
       "checksum": "9b4b8f24ee3e5ab172283f39f53f2f64"
@@ -5007,10 +5009,10 @@
       "checksum": "80c99eff2c6240fc75bfe8d6348b6f3f"
     },
     "R/mod_2_02_results.R": {
-      "checksum": "369882310f2db255a02b254ea00d2829"
+      "checksum": "2865258ee7dbbe91f8b7ec2541a84e00"
     },
     "R/mod_2_03_diagnostics.R": {
-      "checksum": "cd5cc5818176b62c67023a7c3c649101"
+      "checksum": "b95a856b762fc8ec4930c51c8f23d75e"
     },
     "R/mod_2_simulation.R": {
       "checksum": "1635bad43e613277099a7e78d0d79488"
@@ -5064,7 +5066,7 @@
       "checksum": "cb43cbd6c94d4daf359f4619b4b8a900"
     },
     "R/utils_ui.R": {
-      "checksum": "ae1bdd8d9b925741064f9bdec8d9ead0"
+      "checksum": "78466126fa546662a7a22d6c1bcd5d14"
     },
     "src/RcppExports.cpp": {
       "checksum": "d86839517cba2338b433402e7b916ac3"
