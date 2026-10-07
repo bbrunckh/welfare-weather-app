@@ -240,7 +240,8 @@
         run_id = run_id,
         weather_storage = weather_storage,
         weather_collect = weather_collect,
-        weather_threads = weather_threads
+        weather_threads = weather_threads,
+        clear_credentials = clear_credentials
     )
   })
 
@@ -269,7 +270,8 @@
       run_id = job$run_id,
       weather_storage = job$weather_storage,
       weather_collect = job$weather_collect,
-      weather_threads = job$weather_threads
+      weather_threads = job$weather_threads,
+      clear_credentials = .wise_async_clears_credentials(job$snapshot$input$cp)
     )
   }, error = function(e) e)
   if (inherits(mirai_job, "error")) {
@@ -659,6 +661,13 @@
   invisible(TRUE)
 }
 
+# R2-SEC-02: a task that carried UI credentials drops them from the shared
+# worker when it ends. In sync mode the task runs in the main process, whose
+# session state must not be cleared.
+.wise_async_clears_credentials <- function(params) {
+  is.list(params) && identical(params$origin, "ui") && !.wise_step2_async_sync()
+}
+
 .wise_step2_async_launch <- function() {
   state <- .wise_step2_async_state
   mirai::daemons(
@@ -957,7 +966,10 @@ step2_async_worker <- function(snapshot,
                                weather_collect = "fast",
                                weather_threads = "auto",
                                weather_fn = get_weather,
-                               pipeline_fn = run_sim_pipeline) {
+                               pipeline_fn = run_sim_pipeline,
+                               clear_credentials = FALSE) {
+  # R2-SEC-02: drop secrets, tokens and views this task left in the worker.
+  if (isTRUE(clear_credentials)) on.exit(.duck_drop_credentials(), add = TRUE)
   .wise_apply_thread_limits()
   worker_started <- proc.time()[["elapsed"]]
   dir.create(artifact_dir, recursive = TRUE, showWarnings = FALSE)

@@ -483,3 +483,74 @@ test_that("extension loading calls .on_posit_connect() without an exists() guard
   .duck$extensions <- character(0)
   expect_error(.duck_load_ext("not_a_bundled_ext"), "is not bundled")
 })
+
+# R2-SEC-02: tasks that carried UI credentials leave none in the shared worker.
+.sec02_seed_credentials <- function() {
+  .duck$con <- NULL
+  con <- .duck_con()
+  .register_db_secret(con, "user-token", "ab12")
+  .register_cached_secret(con, "s3_secret", list(k = "user-key"),
+    "CREATE OR REPLACE SECRET s3_secret (TYPE S3, KEY_ID 'user-key', SECRET 'user-secret');")
+  DBI::dbExecute(con, "CREATE OR REPLACE VIEW _ld_sec02 AS SELECT 1 AS x;")
+  DBI::dbExecute(con, "CREATE OR REPLACE VIEW keep_sec02 AS SELECT 1 AS x;")
+  .duck$db_tokens <- list(k = list(token = "user-token", expires_at = Sys.time() + 3600))
+  con
+}
+
+.sec02_secret_names <- function(con) {
+  DBI::dbGetQuery(con, "SELECT name FROM duckdb_secrets()")$name
+}
+
+test_that(".duck_drop_credentials removes secrets, tokens and load_data views", {
+  skip_if_not_installed("duckdb")
+  restore_duck <- .duck_state_restore()
+  withr::defer(restore_duck())
+  con <- .sec02_seed_credentials()
+  expect_setequal(.sec02_secret_names(con), c("db_http_ab12", "s3_secret"))
+
+  expect_true(.duck_drop_credentials())
+  expect_length(.sec02_secret_names(con), 0L)
+  expect_identical(.duck$db_tokens, list())
+  expect_identical(.duck$db_secrets, list())
+  views <- DBI::dbGetQuery(con,
+    "SELECT view_name FROM duckdb_views() WHERE NOT internal")$view_name
+  expect_false("_ld_sec02" %in% views)
+  expect_true("keep_sec02" %in% views)
+  expect_true(DBI::dbIsValid(con))
+})
+
+test_that("credential-carrying worker tasks drop credentials on exit, even on error", {
+  skip_if_not_installed("duckdb")
+  restore_duck <- .duck_state_restore()
+  withr::defer(restore_duck())
+  root <- withr::local_tempdir()
+
+  con <- .sec02_seed_credentials()
+  expect_error(step2_async_worker(NULL, "j", 1L, file.path(root, "a"),
+    weather_store_root = file.path(root, "w"), seed = 1L), "ordinary snapshot")
+  expect_length(.sec02_secret_names(con), 2L)
+  expect_error(step2_async_worker(NULL, "j", 1L, file.path(root, "a"),
+    weather_store_root = file.path(root, "w"), seed = 1L,
+    clear_credentials = TRUE), "ordinary snapshot")
+  expect_length(.sec02_secret_names(con), 0L)
+  expect_identical(.duck$db_tokens, list())
+
+  # Overview metadata task (served from the cache here).
+  withr::local_envvar(WISEAPP_METADATA_CACHE_DISABLE = "0")
+  params <- list(type = "local", path = root)
+  overview_metadata_cache_store(params, list(survey_list = data.frame(code = "T")))
+  withr::defer(rm(list = .overview_metadata_cache_key(params),
+    envir = .overview_metadata_cache))
+  con <- .sec02_seed_credentials()
+  load_overview_metadata(params, clear_credentials = TRUE)
+  expect_length(.sec02_secret_names(con), 0L)
+})
+
+test_that("only UI connections outside sync mode clear worker credentials", {
+  withr::local_envvar(WISEAPP_ASYNC_SYNC = "0")
+  expect_true(.wise_async_clears_credentials(list(type = "s3", origin = "ui")))
+  expect_false(.wise_async_clears_credentials(list(type = "s3", origin = "env")))
+  expect_false(.wise_async_clears_credentials(NULL))
+  withr::local_envvar(WISEAPP_ASYNC_SYNC = "1")
+  expect_false(.wise_async_clears_credentials(list(type = "s3", origin = "ui")))
+})
