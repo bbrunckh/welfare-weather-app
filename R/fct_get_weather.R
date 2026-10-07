@@ -1793,12 +1793,22 @@ get_weather <- function(
             dplyr::if_all(dplyr::all_of(delta_vars), ~ !is.na(.x)),
             na.rm = TRUE
           ),
+          n_rows = dplyr::n(),
           .groups = "drop"
         ) |>
-        dplyr::collect()
+        dplyr::collect() |>
+        # CR-BUG-06: a member is usable only with every location-month of the
+        # period present and non-missing; a partial member would otherwise
+        # feed NA or short rows into the ensemble statistics.
+        dplyr::group_by(period_id) |>
+        dplyr::mutate(
+          n_expected = max(n_rows),
+          is_full = n_complete == n_expected & n_expected > 0
+        ) |>
+        dplyr::ungroup()
 
       complete_keys <- complete_model_tbl |>
-        dplyr::filter(n_complete > 0L) |>
+        dplyr::filter(is_full) |>
         dplyr::select(period_id, model)
       if (!nrow(complete_keys)) {
         return(list())
@@ -1837,17 +1847,17 @@ get_weather <- function(
 
         complete_for_period <- complete_model_tbl |>
           dplyr::filter(period_id == !!current_period_id)
-        incomplete_models <- complete_for_period$model[complete_for_period$n_complete == 0L]
+        incomplete_models <- complete_for_period$model[!complete_for_period$is_full]
         if (length(incomplete_models) > 0L) {
           warning(sprintf(
-            "%s / %s: %d model(s) excluded due to missing variables (%s): %s",
+            "%s / %s: %d model(s) excluded due to missing or partial coverage of variables (%s): %s",
             ssp_i, fp_label, length(incomplete_models),
             paste(delta_vars, collapse = ", "),
             paste(incomplete_models, collapse = ", ")
           ), call. = FALSE)
         }
 
-        complete_models <- complete_for_period$model[complete_for_period$n_complete > 0L]
+        complete_models <- complete_for_period$model[complete_for_period$is_full]
         if (length(complete_models) == 0L) next
 
         loc_deltas_by_model <- loc_deltas_complete |>

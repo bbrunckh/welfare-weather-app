@@ -1151,6 +1151,59 @@ test_that("get_weather climate scenario works when CMIP6 is coarser than microda
   expect_equal(cmp$tx_fut - cmp$tx_hist, rep(5, nrow(cmp)), tolerance = 1e-6)
 })
 
+test_that("CR-BUG-06: CMIP6 members with partial coverage are excluded with a warning", {
+  skip_if_not_installed("arrow")
+  skip_if_not_installed("bit64")
+
+  dir <- tempfile("wiseapp-weather-partial-")
+  dir.create(dir, recursive = TRUE)
+  withr::defer(unlink(dir, recursive = TRUE, force = TRUE))
+  fx <- make_test_fixtures_cross_res(
+    dir, seed_cell = "85283473fffffff", micro_res = 5L, weather_res = 4L
+  )
+  make_test_fixtures_cmip6_coarser(dir, fx, cmip6_res = 3L)
+  code <- fx$selected_surveys$code
+  proj_dir <- file.path(dir, "hazard", "weather", "projections", code)
+  hist_path <- file.path(proj_dir, paste0(code, "_cmip6_historical.parquet"))
+  ssp_path <- file.path(proj_dir, paste0(code, "_cmip6_ssp245.parquet"))
+  hist <- arrow::read_parquet(hist_path)
+  ssp <- arrow::read_parquet(ssp_path)
+  copy_model <- function(df, name) { df$model <- name; df }
+  # PARTMOD lacks one future month; FULLMOD is a complete second member.
+  partial_ssp <- copy_model(ssp, "PARTMOD")
+  drop_month <- as.integer(format(max(fx$dates), "%m"))
+  partial_ssp <- partial_ssp[
+    !(partial_ssp$timestamp >= as.Date("2025-01-01") &
+      as.integer(format(partial_ssp$timestamp, "%m")) == drop_month), ]
+  arrow::write_parquet(
+    rbind(hist, copy_model(hist, "FULLMOD"), copy_model(hist, "PARTMOD")), hist_path
+  )
+  arrow::write_parquet(rbind(ssp, copy_model(ssp, "FULLMOD"), partial_ssp), ssp_path)
+
+  warnings <- character()
+  result <- withCallingHandlers(
+    get_weather(
+      survey_data = fx$survey_data,
+      selected_surveys = fx$selected_surveys,
+      selected_weather = sw_continuous("tx"),
+      dates = fx$dates,
+      connection_params = fx$connection_params,
+      ssp = "ssp2_4_5",
+      future_period = c("2025-01-01", "2025-12-31"),
+      perturbation_method = c(tx = "additive")
+    ),
+    warning = function(w) {
+      warnings <<- c(warnings, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_true(any(grepl("partial coverage", warnings) & grepl("PARTMOD", warnings)),
+    info = paste(warnings, collapse = " | "))
+  members <- grep("ssp2_4_5", names(result), value = TRUE)
+  expect_true(any(grepl("TESTMOD$", members)) && any(grepl("FULLMOD$", members)))
+  expect_false(any(grepl("PARTMOD$", members)))
+})
+
 test_that("get_weather is identical across repeated end-to-end calls", {
   skip_if_not_installed("arrow")
   skip_if_not_installed("bit64")
