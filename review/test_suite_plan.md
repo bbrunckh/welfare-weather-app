@@ -8,15 +8,13 @@ What is left to do from `review/test_suite_review.md`, kept deliberately small: 
 
 | Item | Status |
 |---|---|
-| DuckDB 1.5.6 upgrade (bundle, pin, checksums, manifest) | Done, committed (`c733a10`, `d13a585`) |
-| Delete `duckdbfs` skips and skips on hard `Imports` | Done in working tree; **verify committed** |
-| `make_h3_con()` skips instead of erroring | Done in working tree |
-| `tests/testthat/setup-env.R` (pinned caches, unset data and credential variables) | Done in working tree |
-| Workflow: `R CMD check --no-tests`, then `test_local()` from the checkout; extension cache; 45 min timeout | Done in working tree |
-| Full source-tree run: 1067 tests, 0 failed, 0 skipped, about 220 s | Verified locally |
-| **First green GitHub run** | **Not yet seen** |
-
-Check with `git status` and `git log` before step 1; if the working-tree items were committed, nothing more is needed for them.
+| DuckDB 1.5.6 upgrade (bundle, pin, checksums, manifest) | Done (`c733a10`, `d13a585`) |
+| CI-safe suite: `duckdbfs` and redundant skips removed, `make_h3_con()` skips, `setup-env.R`, workflow with `--no-tests` then `test_local()` | Done (`598027f`) |
+| CI roxygen2 pinned to `RoxygenNote` (8.x rewrites NAMESPACE layout) | Done (`4b42488`) |
+| httpfs loaded in the credential-test seed helper; kernel random-draw tolerance 1e-10 | Done (`70cc61d`, `fe599ae`) |
+| **First green GitHub run** | **Done: run 37618324871 on `fe599ae`.** 0 failed, 1 skipped, 7583 expectations. Cold: Tests step 6m33s, job 11m47s. Warm time not yet measured (the extension cache is first saved by that run). |
+| Headless-Chrome PNG test skips on CI | In progress: workflow passes `--no-sandbox` to chromote and the skip message now carries the real error. Verify on the next run that the test runs; if it still skips, read the message. |
+| `R CMD check` WARNING (undocumented `@param`, R2-CQ-01) and 3 NOTEs | Open. `error-on` stays `"error"` until the WARNING is fixed. |
 
 ## Ground rules
 
@@ -103,6 +101,14 @@ Trigger: the CI test step exceeds about 8 minutes, or a local run exceeds about 
 4. Only if still too slow after memoising: consider an explicit skip for the real-process tests locally, controlled by one environment variable, always on in CI.
 
 **Acceptance:** same pass count; same per-file coverage; measurable time drop.
+
+Wider speed options, if more is wanted after memoising (in this order; each needs the per-file timing from item 1 and the coverage check from Step 2):
+
+- Consolidate near-duplicate tests (the duplicated fixture families in the review, M1) so a fixture is built once.
+- Drop non-essential tests only where the coverage method shows no `R/` line loses coverage and no distinct behaviour is pinned.
+- Speed up the slowest remaining tests by shrinking inputs (rows, draws, years) without changing what is asserted.
+
+CI reference at 2026-10-07: Tests step 6m33s cold against the 8-minute trigger, so Step 3 additions have only about 1.5 minutes of headroom.
 
 ---
 
