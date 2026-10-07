@@ -4964,9 +4964,6 @@
     "inst/duckdb_extensions/httpfs.duckdb_extension.gz": {
       "checksum": "6d61dae1b933bfad063b4c84fcf22023"
     },
-    "inst/duckdb_extensions/spatial.duckdb_extension.gz": {
-      "checksum": "7888a09539c41ab143f5642ed8edb603"
-    },
     "inst/golem-config.yml": {
       "checksum": "fb332cd6d7ae6db6e4a60068f803c6f9"
     },
@@ -5016,7 +5013,7 @@
       "checksum": "e494bc397780104647ac75e86b88d3e3"
     },
     "R/fct_load_data.R": {
-      "checksum": "c8cb0e0ac3fe83525faabe1c9a55fe43"
+      "checksum": "529e0f926357133a8e25e80432374da3"
     },
     "R/fct_loc_panel.R": {
       "checksum": "b2407043eb1f27a5b8ca7701cf027047"
@@ -5109,7 +5106,7 @@
       "checksum": "696ed23f4221565856d153db49523993"
     },
     "R/globals.R": {
-      "checksum": "a8556272ad990f732a24fe6f0f8a206b"
+      "checksum": "2b2d44992f3ea77c9156cef2dbe67536"
     },
     "R/mod_0_overview.R": {
       "checksum": "39ee2cc5a18805b67ad2c8ac5e134d03"
